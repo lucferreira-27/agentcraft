@@ -17,7 +17,6 @@ class LLM {
       case 'claude':
         return new ClaudeProvider(process.env.CLAUDE_API_KEY);
       case 'google':
-        console.log(process.env.GOOGLE_API_KEY)
         return new GoogleProvider(process.env.GOOGLE_API_KEY);
       case 'openrouter':
         return new OpenRouterProvider(process.env.OPENROUTER_API_KEY);

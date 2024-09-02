@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "babel-node index.js"
+    "start": "babel-node index.js",
+    "dev": "nodemon --exec babel-node index.js"
   },
   "keywords": [],
   "author": "",
@@ -13,6 +14,7 @@
     "@google/generative-ai": "^0.17.1",
     "axios": "^1.7.7",
     "dotenv": "^16.4.5",
+    "minecraft-llm-agent": "file:",
     "mineflayer": "^4.20.1",
     "mineflayer-pathfinder": "^2.4.5",
     "winston": "^3.14.2"

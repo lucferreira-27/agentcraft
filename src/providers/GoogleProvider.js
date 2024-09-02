@@ -9,6 +9,7 @@ class GoogleProvider extends BaseProvider {
     this.genAI = new GoogleGenerativeAI(apiKey);
     this.model = this.genAI.getGenerativeModel({ 
       model: "gemini-1.5-flash-exp-0827",
+      generationConfig: { responseMimeType: "application/json" },
       safetySettings: [
         {
           category: HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -44,9 +45,7 @@ class GoogleProvider extends BaseProvider {
           maxOutputTokens: 2048,
         },
       });
-
-      const result = await chat.sendMessage(prompt.content, {
-        tools: [{
+      const tools = [{
           functionDeclarations: availableActions.map(action => ({
             name: action.name,
             description: action.description,
@@ -63,10 +62,16 @@ class GoogleProvider extends BaseProvider {
             }
           }))
         }]
-      });
+      
+      const result = await chat.sendMessage(prompt.content);
+      //console.log(`Prompt: ${prompt.content} \n\n Tools: ${JSON.stringify(tools)}`);
 
       const response = result.response;
-      logger.debug(`Google Gemini API response: ${JSON.stringify(response)}`);
+      const loggingFriendlyResponse = {
+        response: response.candidates[0].content.parts[0].text,
+        tokens: response.usageMetadata
+      }
+      logger.debug(`Google Gemini API response: ${JSON.stringify(loggingFriendlyResponse, null, 2)}`);
 
       let parsedResponse;
 
@@ -75,9 +80,7 @@ class GoogleProvider extends BaseProvider {
         if (content.parts && content.parts.length > 0) {
           const text = content.parts[0].text;
           try {
-            // Remove any markdown formatting and parse the JSON
-            const jsonString = text.replace(/```json\n|\n```/g, '').trim();
-            parsedResponse = JSON.parse(jsonString);
+            parsedResponse = JSON.parse(text);
           } catch (error) {
             logger.error(`Error parsing JSON response: ${error.message}`);
             parsedResponse = { message: text };

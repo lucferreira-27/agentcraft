@@ -17,7 +17,7 @@ class Agent {
     this.bot = null;
     this.llm = new LLM(providerName);
     this.goalManager = new GoalManager();
-    this.actions = null;
+    this.actions = new Actions(this.bot, this.goalManager, this);
     this.perception = null;
     this.lastInteractingPlayer = null;
     this.conversationMemory = new ConversationMemory();
@@ -28,7 +28,6 @@ class Agent {
     );
     this.isWritingJournal = false;
     this.metaAgent = new MetaAgent(this, providerName);
-    logger.info(`Agent instance created with ${providerName} provider`);
   }
 
   async connect() {
@@ -151,16 +150,13 @@ Remember:
     try {
       logger.info(`Sending chat message: ${response.message}`);
       this.bot.chat(response.message);
-
-      // Add the interaction to conversation memory
       this.conversationMemory.addEntry(username, message, response);
 
       if (response.actions && response.actions.length > 0) {
         for (const actionInfo of response.actions) {
           logger.info(`Adding goal: ${actionInfo.action}`);
           this.goalManager.addGoal(actionInfo.action, actionInfo.args || []);
-          await this.goalManager.executeNextGoal(this.actions);
-          
+          await this.goalManager.executeGoals(this.actions);
           // Check if the action was successful
           const lastGoal = this.goalManager.getLastCompletedGoal();
           if (lastGoal && lastGoal.status === 'failed') {
@@ -170,7 +166,8 @@ Remember:
               playerMessage: message,
               agentResponse: response,
               worldState: await this.perception.getWorldState(),
-              recentActions: this.goalManager.getRecentCompletedGoals(5)
+              recentActions: this.goalManager.getRecentCompletedGoals(5),
+              allPossibleActions: this.actions.getAll()
             };
             const analysis = await this.metaAgent.analyze(context);
             if (analysis.correctiveActions && analysis.correctiveActions.length > 0) {
@@ -184,7 +181,7 @@ Remember:
       // Check if it's time to write a journal entry
       await this.checkAndWriteJournal();
     } catch (error) {
-      logger.error(`Error handling LLM response: ${error.message}`);
+      logger.error(`Error handling LLM response: ${error.message} ${error.stack}`);
       this.bot.chat("I'm sorry, I couldn't process that request properly.");
     }
   }

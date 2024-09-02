@@ -7,7 +7,6 @@ class ActionRegistry {
 
   register(name, metadata, handler) {
     this.actions.set(name, { metadata, handler });
-    logger.info(`Registered action: ${name}`);
   }
 
   get(name) {

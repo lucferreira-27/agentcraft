@@ -24,7 +24,7 @@ ${JSON.stringify(context, null, 2)}
 Analyze the agent's behavior and respond with:
 1. An assessment of the agent's performance
 2. Identification of any errors or suboptimal behaviors
-3. Suggestions for improvement
+3. Suggestions for improvement, this should be a list of actions the agent can take to achieve the goal
 4. Corrective actions if necessary
 
 Respond in the following JSON format:

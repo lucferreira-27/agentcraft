@@ -42,8 +42,15 @@ main().catch(error => {
 
 process.on('uncaughtException', (error) => {
   logger.error(`Uncaught exception: ${error.message}`);
+  logger.error(`Stack trace: ${error.stack}`);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  logger.error(`Unhandled rejection at ${promise}, reason: ${reason}`);
+  logger.error(`Unhandled rejection at ${promise}`);
+  if (reason instanceof Error) {
+    logger.error(`Reason: ${reason.message}`);
+    logger.error(`Stack trace: ${reason.stack}`);
+  } else {
+    logger.error(`Reason: ${reason}`);
+  }
 });

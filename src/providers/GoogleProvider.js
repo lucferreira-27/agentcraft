@@ -1,4 +1,4 @@
-const axios = require('axios');
+const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 const BaseProvider = require('./BaseProvider');
 const { logger } = require('../utils');
 const { registry } = require('../actionRegistry');
@@ -6,75 +6,87 @@ const { registry } = require('../actionRegistry');
 class GoogleProvider extends BaseProvider {
   constructor(apiKey) {
     super(apiKey);
-    this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models';
-    this.model = 'gemini-1.5-flash';
+    this.genAI = new GoogleGenerativeAI(apiKey);
+    this.model = this.genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash-exp-0827",
+      safetySettings: [
+        {
+          category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        },
+      ]
+    });
   }
 
   async getResponse(prompt) {
     try {
       logger.info('Sending request to Google Gemini API');
       const availableActions = registry.getAll();
-      const response = await axios.post(
-        `${this.baseUrl}/${this.model}:generateContent`,
-        {
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: prompt.content }]
-            }
-          ],
-          generationConfig: {
-            temperature: 0.7,
-            topP: 1,
-            topK: 1,
-            maxOutputTokens: 2048,
-          },
-          safetySettings: [
-            {
-              category: 'HARM_CATEGORY_DANGEROUS',
-              threshold: 'BLOCK_MEDIUM_AND_ABOVE'
-            }
-          ],
-          tools: [{
-            functionDeclarations: availableActions.map(action => ({
-              name: action.name,
-              description: action.description,
-              parameters: {
-                type: 'object',
-                properties: action.parameters.reduce((acc, param) => {
-                  acc[param.name] = {
-                    type: param.type,
-                    description: param.description
-                  };
-                  return acc;
-                }, {}),
-                required: action.parameters.filter(param => !param.default).map(param => param.name)
-              }
-            }))
-          }]
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
 
-      logger.debug(`Google Gemini API response: ${JSON.stringify(response.data)}`);
-      
-      const content = response.data.candidates[0].content;
+      const chat = this.model.startChat({
+        history: [],
+        generationConfig: {
+          temperature: 0.7,
+          topP: 1,
+          topK: 1,
+          maxOutputTokens: 2048,
+        },
+      });
+
+      const result = await chat.sendMessage(prompt.content, {
+        tools: [{
+          functionDeclarations: availableActions.map(action => ({
+            name: action.name,
+            description: action.description,
+            parameters: {
+              type: 'object',
+              properties: action.parameters.reduce((acc, param) => {
+                acc[param.name] = {
+                  type: param.type,
+                  description: param.description
+                };
+                return acc;
+              }, {}),
+              required: action.parameters.filter(param => !param.default).map(param => param.name)
+            }
+          }))
+        }]
+      });
+
+      const response = result.response;
+      logger.debug(`Google Gemini API response: ${JSON.stringify(response)}`);
+
       let parsedResponse;
 
-      if (content.parts[0].functionCall) {
-        const functionCall = content.parts[0].functionCall;
-        parsedResponse = {
-          message: content.parts[0].text || "I'm performing an action.",
-          action: functionCall.name,
-          args: Object.values(functionCall.args)
-        };
+      if (response.candidates && response.candidates.length > 0) {
+        const content = response.candidates[0].content;
+        if (content.parts && content.parts.length > 0) {
+          const text = content.parts[0].text;
+          try {
+            // Remove any markdown formatting and parse the JSON
+            const jsonString = text.replace(/```json\n|\n```/g, '').trim();
+            parsedResponse = JSON.parse(jsonString);
+          } catch (error) {
+            logger.error(`Error parsing JSON response: ${error.message}`);
+            parsedResponse = { message: text };
+          }
+        } else {
+          throw new Error('No content parts in the response');
+        }
       } else {
-        parsedResponse = JSON.parse(content.parts[0].text);
+        throw new Error('No candidates in the response');
       }
 
       return parsedResponse;

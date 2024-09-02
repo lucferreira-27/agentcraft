@@ -59,6 +59,13 @@ class Actions {
       description: 'Clear all pending goals',
       parameters: []
     }, this.clearAllGoals.bind(this));
+
+    registry.register('rememberThis', {
+      description: 'Write an important piece of information to the journal',
+      parameters: [
+        { name: 'information', type: 'string', description: 'The information to remember' }
+      ]
+    }, this.rememberThis.bind(this));
   }
 
   async moveToBlock(blockType, count = 1) {
@@ -200,6 +207,12 @@ class Actions {
   async clearAllGoals() {
     this.goalManager.clearGoals();
     this.bot.chat("I've cleared all my pending goals.");
+  }
+
+  async rememberThis(information) {
+    logger.info(`Remembering: ${information}`);
+    await this.agent.journalKeeper.addCustomEntry(information);
+    this.bot.chat("I've made a note of that information.");
   }
 
   async executeAction(actionName, args) {

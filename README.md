@@ -41,4 +41,4 @@ Contributions are welcome! Please open an issue or pull request if you have any 
 
 ## License
 
-This project is licensed under the ISC License.
+This project is licensed under Apache 2.0. See the LICENSE file for more details.

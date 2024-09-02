@@ -13,6 +13,7 @@ class GoalManager {
   constructor() {
     this.goals = [];
     this.currentGoal = null;
+    this.completedGoals = [];
   }
 
   addGoal(action, args, priority = 1) {
@@ -47,7 +48,16 @@ class GoalManager {
       this.currentGoal.status = 'failed';
     }
 
+    this.completedGoals.push(this.currentGoal);
     this.currentGoal = null;
+  }
+
+  getLastCompletedGoal() {
+    return this.completedGoals[this.completedGoals.length - 1];
+  }
+
+  getRecentCompletedGoals(count = 5) {
+    return this.completedGoals.slice(-count);
   }
 
   getCurrentGoal() {

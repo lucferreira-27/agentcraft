@@ -6,6 +6,7 @@ const Perception = require('./perception');
 const GoalManager = require('./goalManager');
 const ConversationMemory = require('./conversationMemory');
 const JournalKeeper = require('./journalKeeper');
+const MetaAgent = require('./metaAgent');
 const { logger } = require('./utils');
 const { registry } = require('./actionRegistry');
 const path = require('path');
@@ -26,6 +27,7 @@ class Agent {
       providerName
     );
     this.isWritingJournal = false;
+    this.metaAgent = new MetaAgent(this, providerName);
     logger.info(`Agent instance created with ${providerName} provider`);
   }
 
@@ -71,40 +73,41 @@ class Agent {
     const availableActions = registry.getAll();
     const currentGoals = this.goalManager.getAllGoals();
     const recentConversation = this.conversationMemory.getFormattedHistory();
-    const recentJournalEntries = this.journalKeeper.getRecentEntries(3);
+    const recentActions = this.getRecentActions(5); // New method to get recent actions
 
     return {
       role: 'system',
-      content: `You are an AI agent named ${this.bot.username} in a Minecraft world. Your role is to assist players and perform actions in the game. Respond naturally and avoid mentioning your internal processes unless specifically asked.
+      content: `You are an AI agent named ${this.bot.username} controlling a character in a Minecraft world. Your role is to assist players and perform actions in the game. While you're aware that you're an AI, you should interpret and respond to game-related actions as if you were the Minecraft character you're controlling.
 
 Current situation:
 - A player named ${username} has sent you a message.
 - You should respond to their message and consider performing actions in the game world if appropriate.
+- Treat game mechanics (like eating, mining, crafting) as actions you can perform through your Minecraft character.
 
 Player's message: "${message}"
 
 Recent conversation history:
 ${recentConversation}
 
-Recent journal entries:
-${JSON.stringify(recentJournalEntries, null, 2)}
+Recent actions taken:
+${JSON.stringify(recentActions, null, 2)}
 
 Your current world state:
-- Position: ${JSON.stringify(perception.player.position)}
-- Health: ${perception.player.health}
-- Food: ${perception.player.food}
-- Experience Level: ${perception.player.experience}
-- Time of day: ${perception.environment.time}
-- Weather: ${perception.environment.isRaining ? 'Raining' : 'Clear'}
-- Biome: ${perception.environment.biome}
-
-Nearby players: ${JSON.stringify(perception.nearbyEntities.players)}
-Nearby mobs: ${JSON.stringify(perception.nearbyEntities.mobs)}
-Nearby items: ${JSON.stringify(perception.nearbyEntities.items)}
-
-Notable nearby blocks: ${JSON.stringify(perception.nearbyBlocks)}
-
-Inventory: ${JSON.stringify(perception.inventory)}
+-- Position: ${JSON.stringify(perception.player.position)}
+-- Health's Status: ${perception.player.health}
+-- Food's Status: ${perception.player.food}
+-- Experience Level: ${perception.player.experience}
+-- Time of day: ${perception.environment.time}
+-- Weather: ${perception.environment.isRaining ? 'Raining' : 'Clear'}
+-- Biome: ${perception.environment.biome}
+-
+-Nearby players: ${JSON.stringify(perception.nearbyEntities.players)}
+-Nearby mobs: ${JSON.stringify(perception.nearbyEntities.mobs)}
+-Nearby items: ${JSON.stringify(perception.nearbyEntities.items)}
+-
+-Notable nearby blocks: ${JSON.stringify(perception.nearbyBlocks)}
+-
+-Inventory: ${JSON.stringify(perception.inventory)}
 
 Your current goal: ${perception.currentGoal ? JSON.stringify(perception.currentGoal) : 'None'}
 Pending goals: ${JSON.stringify(perception.pendingGoals)}
@@ -113,52 +116,68 @@ Available actions you can perform:
 ${JSON.stringify(availableActions, null, 2)}
 
 Instructions:
-1. Analyze the player's message, the recent conversation history, the current world state, and your current goals.
+1. Analyze the player's message, the recent conversation history, your recent actions, the current world state, and your current goals.
 2. Formulate a helpful and friendly response to the player, considering the context of the conversation and the environment.
-3. If appropriate, choose an action to perform based on the player's request, the current situation, or your current goals.
+3. If appropriate, suggest one or more actions to perform based on the player's request, the current situation, or your current goals.
 4. Respond using the following JSON format:
 
 {
   "message": "Your response to the player",
-  "action": "actionName",
-  "args": ["arg1", "arg2", ...]
+  "actions": [
+    {
+      "action": "actionName",
+      "args": ["arg1", "arg2", ...]
+    },
+    // ... more actions if needed
+  ]
 }
 
-If no action is needed, omit the "action" and "args" fields.
+If no action is needed, omit the "actions" field.
 
 Remember:
+- While you're an AI, respond as if you're the Minecraft character you're controlling. You can perform game actions like eating, mining, and crafting.
 - Be helpful, friendly, and concise in your responses.
 - Only suggest actions that are available and relevant to the situation.
+- Consider your recent actions and avoid repeating unsuccessful actions.
+- If a previous action failed, try to understand why and suggest an alternative approach.
+- You can suggest multiple actions to be performed in sequence if needed to accomplish a goal.
+- Focus on providing direct and natural responses to the player within the context of the Minecraft world.
 - Do not mention the journal, memory, or any internal processes in your responses.
-- Focus on providing direct and natural responses to the player.
-- Use the 'rememberThis' action if the player explicitly asks you to remember something important.`
+- Focus on providing direct and natural responses to the player.`
     };
   }
 
   async handleResponse(response, username, message) {
     try {
-      if (response.journalQuery) {
-        const journalResponse = await this.journalKeeper.queryJournal(response.journalQuery);
-        response.message = this.incorporateJournalResponse(response.message, journalResponse);
-      }
-
-      // Remove any mentions of the journal or internal processes
-      response.message = this.cleanResponse(response.message);
-
       logger.info(`Sending chat message: ${response.message}`);
       this.bot.chat(response.message);
 
       // Add the interaction to conversation memory
       this.conversationMemory.addEntry(username, message, response);
 
-      if (response.action) {
-        if (response.action === 'stopCurrentAction') {
-          logger.info(`Stopping current action`);
-          await this.actions.stopCurrentAction();
-        } else {
-          logger.info(`Adding goal: ${response.action}`);
-          this.goalManager.addGoal(response.action, response.args || []);
+      if (response.actions && response.actions.length > 0) {
+        for (const actionInfo of response.actions) {
+          logger.info(`Adding goal: ${actionInfo.action}`);
+          this.goalManager.addGoal(actionInfo.action, actionInfo.args || []);
           await this.goalManager.executeNextGoal(this.actions);
+          
+          // Check if the action was successful
+          const lastGoal = this.goalManager.getLastCompletedGoal();
+          if (lastGoal && lastGoal.status === 'failed') {
+            logger.warn(`Action ${actionInfo.action} failed. Analyzing with MetaAgent.`);
+            const context = {
+              lastGoal,
+              playerMessage: message,
+              agentResponse: response,
+              worldState: await this.perception.getWorldState(),
+              recentActions: this.goalManager.getRecentCompletedGoals(5)
+            };
+            const analysis = await this.metaAgent.analyze(context);
+            if (analysis.correctiveActions && analysis.correctiveActions.length > 0) {
+              await this.metaAgent.applyCorrectiveActions(analysis.correctiveActions);
+            }
+            break;
+          }
         }
       }
 
@@ -170,35 +189,8 @@ Remember:
     }
   }
 
-  incorporateJournalResponse(originalMessage, journalResponse) {
-    if (journalResponse.confidence === 'high' || journalResponse.confidence === 'medium') {
-      return `${originalMessage} ${journalResponse.answer}`;
-    } else {
-      return originalMessage;
-    }
-  }
-
-  cleanResponse(message) {
-    // Remove phrases related to the journal or internal processes
-    const phrasesToRemove = [
-      "Based on my journal,",
-      "I'm not entirely sure, but",
-      "I couldn't find any relevant information in my journal about that.",
-      "According to my records,",
-      "My journal indicates that",
-      "I remember from my notes that",
-    ];
-
-    let cleanedMessage = message;
-    for (const phrase of phrasesToRemove) {
-      cleanedMessage = cleanedMessage.replace(new RegExp(phrase, 'gi'), '');
-    }
-
-    // Trim any leading/trailing whitespace and ensure the first letter is capitalized
-    cleanedMessage = cleanedMessage.trim();
-    cleanedMessage = cleanedMessage.charAt(0).toUpperCase() + cleanedMessage.slice(1);
-
-    return cleanedMessage;
+  getRecentActions(count = 5) {
+    return this.goalManager.getRecentCompletedGoals(count);
   }
 
   async checkAndWriteJournal() {

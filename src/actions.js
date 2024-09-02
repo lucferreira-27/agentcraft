@@ -1,6 +1,7 @@
 const { goals, Movements } = require('mineflayer-pathfinder');
 const { logger } = require('./utils');
 const { registry } = require('./actionRegistry');
+const Vec3 = require('vec3');
 
 class Actions {
   constructor(bot, goalManager, agent) {
@@ -66,6 +67,75 @@ class Actions {
         { name: 'information', type: 'string', description: 'The information to remember' }
       ]
     }, this.rememberThis.bind(this));
+
+    registry.register('eatItem', {
+      description: 'Eat a food item from the inventory',
+      parameters: [
+        { name: 'itemName', type: 'string', description: 'The name of the food item to eat' }
+      ]
+    }, this.eatItem.bind(this));
+
+    registry.register('equipItem', {
+      description: 'Equip an item from the inventory',
+      parameters: [
+        { name: 'itemName', type: 'string', description: 'The name of the item to equip' },
+        { name: 'destination', type: 'string', description: 'Where to equip the item (hand, head, torso, legs, feet)', default: 'hand' }
+      ]
+    }, this.equipItem.bind(this));
+
+    registry.register('dropItem', {
+      description: 'Drop an item from the inventory',
+      parameters: [
+        { name: 'itemName', type: 'string', description: 'The name of the item to drop' },
+        { name: 'count', type: 'number', description: 'The number of items to drop', default: 1 }
+      ]
+    }, this.dropItem.bind(this));
+
+    registry.register('attackEntity', {
+      description: 'Attack a nearby entity',
+      parameters: [
+        { name: 'entityName', type: 'string', description: 'The name of the entity to attack' }
+      ]
+    }, this.attackEntity.bind(this));
+
+    registry.register('lookAt', {
+      description: 'Look at a specific position or entity',
+      parameters: [
+        { name: 'target', type: 'string', description: 'The position (x,y,z) or entity name to look at' }
+      ]
+    }, this.lookAt.bind(this));
+
+    registry.register('jump', {
+      description: 'Make the bot jump',
+      parameters: []
+    }, this.jump.bind(this));
+
+    registry.register('openContainer', {
+      description: 'Open a nearby container',
+      parameters: [
+        { name: 'containerType', type: 'string', description: 'The type of container to open (e.g., chest, furnace)' }
+      ]
+    }, this.openContainer.bind(this));
+
+    registry.register('sleep', {
+      description: 'Sleep in a nearby bed',
+      parameters: []
+    }, this.sleep.bind(this));
+
+    registry.register('wakeUp', {
+      description: 'Wake up from sleeping',
+      parameters: []
+    }, this.wakeUp.bind(this));
+
+    registry.register('fish', {
+      description: 'Start fishing',
+      parameters: []
+    }, this.fish.bind(this));
+
+    registry.register('stopFishing', {
+      description: 'Stop fishing',
+      parameters: []
+    }, this.stopFishing.bind(this));
   }
 
   async moveToBlock(blockType, count = 1) {
@@ -213,6 +283,165 @@ class Actions {
     logger.info(`Remembering: ${information}`);
     await this.agent.journalKeeper.addCustomEntry(information);
     this.bot.chat("I've made a note of that information.");
+  }
+
+  async eatItem(itemName) {
+    const item = this.bot.inventory.items().find(item => item.name === itemName);
+    if (!item) {
+      this.bot.chat(`I don't have any ${itemName} in my inventory.`);
+      return;
+    }
+
+    try {
+      await this.bot.equip(item, 'hand');
+      await this.bot.consume();
+      this.bot.chat(`I've eaten the ${itemName}.`);
+    } catch (error) {
+      this.bot.chat(`I couldn't eat the ${itemName}: ${error.message}`);
+    }
+  }
+
+  async equipItem(itemName, destination = 'hand') {
+    const item = this.bot.inventory.items().find(item => item.name === itemName);
+    if (!item) {
+      this.bot.chat(`I don't have any ${itemName} in my inventory.`);
+      return;
+    }
+
+    try {
+      await this.bot.equip(item, destination);
+      this.bot.chat(`I've equipped the ${itemName} to my ${destination}.`);
+    } catch (error) {
+      this.bot.chat(`I couldn't equip the ${itemName}: ${error.message}`);
+    }
+  }
+
+  async dropItem(itemName, count = 1) {
+    const item = this.bot.inventory.items().find(item => item.name === itemName);
+    if (!item) {
+      this.bot.chat(`I don't have any ${itemName} in my inventory.`);
+      return;
+    }
+
+    try {
+      await this.bot.toss(item.type, null, count);
+      this.bot.chat(`I've dropped ${count} ${itemName}.`);
+    } catch (error) {
+      this.bot.chat(`I couldn't drop the ${itemName}: ${error.message}`);
+    }
+  }
+
+  async attackEntity(entityName) {
+    const entity = Object.values(this.bot.entities).find(e => e.name === entityName);
+    if (!entity) {
+      this.bot.chat(`I can't see any ${entityName} nearby.`);
+      return;
+    }
+
+    try {
+      await this.bot.attack(entity);
+      this.bot.chat(`I've attacked the ${entityName}.`);
+    } catch (error) {
+      this.bot.chat(`I couldn't attack the ${entityName}: ${error.message}`);
+    }
+  }
+
+  async lookAt(target) {
+    try {
+      if (target.includes(',')) {
+        const [x, y, z] = target.split(',').map(Number);
+        await this.bot.lookAt(new Vec3(x, y, z));
+        this.bot.chat(`I'm now looking at the position (${x}, ${y}, ${z}).`);
+      } else {
+        const entity = Object.values(this.bot.entities).find(e => e.name === target);
+        if (!entity) {
+          this.bot.chat(`I can't see any ${target} to look at.`);
+          return;
+        }
+        await this.bot.lookAt(entity.position);
+        this.bot.chat(`I'm now looking at the ${target}.`);
+      }
+    } catch (error) {
+      this.bot.chat(`I couldn't look at the target: ${error.message}`);
+    }
+  }
+
+  async jump() {
+    try {
+      await this.bot.setControlState('jump', true);
+      await this.bot.setControlState('jump', false);
+      this.bot.chat("I've jumped!");
+    } catch (error) {
+      this.bot.chat(`I couldn't jump: ${error.message}`);
+    }
+  }
+
+  async openContainer(containerType) {
+    const container = this.bot.findBlock({
+      matching: block => block.name === containerType,
+      maxDistance: 6
+    });
+
+    if (!container) {
+      this.bot.chat(`I can't find any ${containerType} nearby.`);
+      return;
+    }
+
+    try {
+      const chest = await this.bot.openContainer(container);
+      this.bot.chat(`I've opened the ${containerType}.`);
+      // You might want to do something with the opened container here
+      await chest.close();
+    } catch (error) {
+      this.bot.chat(`I couldn't open the ${containerType}: ${error.message}`);
+    }
+  }
+
+  async sleep() {
+    const bed = this.bot.findBlock({
+      matching: block => this.bot.isABed(block),
+      maxDistance: 6
+    });
+
+    if (!bed) {
+      this.bot.chat("I can't find any bed nearby.");
+      return;
+    }
+
+    try {
+      await this.bot.sleep(bed);
+      this.bot.chat("I'm now sleeping.");
+    } catch (error) {
+      this.bot.chat(`I couldn't sleep: ${error.message}`);
+    }
+  }
+
+  async wakeUp() {
+    try {
+      await this.bot.wake();
+      this.bot.chat("I've woken up and I'm ready to go!");
+    } catch (error) {
+      this.bot.chat(`I couldn't wake up: ${error.message}`);
+    }
+  }
+
+  async fish() {
+    try {
+      await this.bot.equip(this.bot.inventory.items().find(item => item.name === 'fishing_rod'), 'hand');
+      await this.bot.fish();
+      this.bot.chat("I've started fishing.");
+    } catch (error) {
+      this.bot.chat(`I couldn't start fishing: ${error.message}`);
+    }
+  }
+
+  async stopFishing() {
+    try {
+      this.bot.activateItem();
+      this.bot.chat("I've stopped fishing.");
+    } catch (error) {
+      this.bot.chat(`I couldn't stop fishing: ${error.message}`);
+    }
   }
 
   async executeAction(actionName, args) {

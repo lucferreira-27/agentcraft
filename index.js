@@ -4,6 +4,8 @@ const path = require('path');
 const Agent = require('./src/agent');
 const { logger } = require('./src/utils');
 
+logger.level = process.env.LOG_LEVEL || 'info';
+
 async function ensureDataDirectory() {
   const dataDir = path.join(__dirname, 'data');
   try {

@@ -17,8 +17,8 @@ class Agent {
     this.bot = null;
     this.llm = new LLM(providerName);
     this.goalManager = new GoalManager();
-    this.actions = new Actions(this.bot, this.goalManager, this);
-    this.perception = null;
+    this.actions = null; // We'll initialize this after bot creation
+    this.perception = null; // We'll initialize this after bot creation
     this.lastInteractingPlayer = null;
     this.conversationMemory = new ConversationMemory();
     this.journalKeeper = new JournalKeeper(
@@ -34,12 +34,10 @@ class Agent {
     logger.info('Connecting to Minecraft server...');
     this.bot = mineflayer.createBot(this.options);
     this.bot.loadPlugin(pathfinder);
-    this.actions = new Actions(this.bot, this.goalManager, this);
-    this.perception = new Perception(this.bot, this.goalManager);
-
-    await this.journalKeeper.loadJournal();
 
     this.bot.once('spawn', () => {
+      this.actions = new Actions(this.bot, this.goalManager, this);
+      this.perception = new Perception(this.bot, this.goalManager); // Initialize perception here
       logger.info('Agent spawned in the world');
       this.bot.chat('Hello! I am an AI agent. How can I assist you today?');
     });
@@ -114,11 +112,15 @@ Pending goals: ${JSON.stringify(perception.pendingGoals)}
 Available actions you can perform:
 ${JSON.stringify(availableActions, null, 2)}
 
+Generic block labels:
+${JSON.stringify(this.actions.getGenericLabels(), null, 2)}
+
 Instructions:
 1. Analyze the player's message, the recent conversation history, your recent actions, the current world state, and your current goals.
 2. Formulate a helpful and friendly response to the player, considering the context of the conversation and the environment.
 3. If appropriate, suggest one or more actions to perform based on the player's request, the current situation, or your current goals.
-4. Respond using the following JSON format:
+4. When referring to blocks or items, use generic labels where appropriate. For example, use 'wood' instead of specific wood types like 'oak_log' or 'birch_log'.
+5. Respond using the following JSON format:
 
 {
   "message": "Your response to the player",
@@ -140,9 +142,9 @@ Remember:
 - Consider your recent actions and avoid repeating unsuccessful actions.
 - If a previous action failed, try to understand why and suggest an alternative approach.
 - You can suggest multiple actions to be performed in sequence if needed to accomplish a goal.
+- Use generic block labels when appropriate to make your language more natural and flexible.
 - Focus on providing direct and natural responses to the player within the context of the Minecraft world.
-- Do not mention the journal, memory, or any internal processes in your responses.
-- Focus on providing direct and natural responses to the player.`
+- Do not mention the journal, memory, or any internal processes in your responses.`
     };
   }
 
@@ -154,7 +156,6 @@ Remember:
 
       if (response.actions && response.actions.length > 0) {
         for (const actionInfo of response.actions) {
-          logger.info(`Adding goal: ${actionInfo.action}`);
           this.goalManager.addGoal(actionInfo.action, actionInfo.args || []);
           await this.goalManager.executeGoals(this.actions);
           // Check if the action was successful

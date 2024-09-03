@@ -71,8 +71,8 @@ class GoogleProvider extends BaseProvider {
         response: response.candidates[0].content.parts[0].text,
         tokens: response.usageMetadata
       }
-      logger.debug(`Google Gemini API response: ${JSON.stringify(loggingFriendlyResponse, null, 2)}`);
-
+      //logger.debug(`Google Gemini API response: ${JSON.stringify(loggingFriendlyResponse, null, 2)}`);
+      logger.debug(`Gemini 1.5 Flash | Tokens Usage: ${JSON.stringify(loggingFriendlyResponse.tokens)}`);
       let parsedResponse;
 
       if (response.candidates && response.candidates.length > 0) {

@@ -160,6 +160,7 @@ Remember:
           await this.goalManager.executeGoals(this.actions);
           // Check if the action was successful
           const lastGoal = this.goalManager.getLastCompletedGoal();
+          /*
           if (lastGoal && lastGoal.status === 'failed') {
             logger.warn(`Action ${actionInfo.action} failed. Analyzing with MetaAgent.`);
             const context = {
@@ -176,6 +177,7 @@ Remember:
             }
             break;
           }
+          */
         }
       }
 

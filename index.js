@@ -2,9 +2,21 @@ require('dotenv').config();
 const fs = require('fs').promises;
 const path = require('path');
 const Agent = require('./src/agent');
-const { logger } = require('./src/utils');
+const winston = require('winston');
 
-logger.level = process.env.LOG_LEVEL || 'info';
+const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.colorize(),
+    winston.format.printf(({ timestamp, level, message }) => {
+      return `${timestamp} [${level}]: ${message}`;
+    })
+  ),
+  transports: [
+    new winston.transports.Console()
+  ]
+});
 
 async function ensureDataDirectory() {
   const dataDir = path.join(__dirname, 'data');

@@ -1,4 +1,6 @@
 node_modules/
+minecraft-server/
 agent.log
 .env
+.cursorrules
 data/

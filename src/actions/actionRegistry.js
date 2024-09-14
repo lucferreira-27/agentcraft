@@ -120,59 +120,119 @@ actionRegistry.registerAction('followPlayer', async function({ username, stopAtP
 actionRegistry.registerAction('collectBlock', async function({ blockType, quantity }, bot, goalManager, shouldStop) {
   const blocksToCollect = blockTypeMapping[blockType] || [blockType];
   let collectedCount = 0;
+  let maxSearchDistance = 32;
 
-  for (const currentBlockType of blocksToCollect) {
+  logger.info('ActionExecutor', `Starting to collect ${quantity} ${blockType}`);
+
+  async function collectDroppedItems() {
+    logger.info('ActionExecutor', `Collecting dropped items`);
+    const droppedItems = Object.values(bot.entities).filter(entity => 
+      entity.name === 'item' && 
+      blocksToCollect.includes(entity.entityType)
+    );
+
+    for (const item of droppedItems) {
+      if (shouldStop()) return;
+
+      if (bot.entity.position.distanceTo(item.position) > 2) {
+        await bot.pathfinder.goto(new GoalNear(item.position.x, item.position.y, item.position.z, 1));
+      }
+
+      try {
+        await bot.collectBlock.collect(item);
+        collectedCount++;
+        logger.info('ActionExecutor', `Collected dropped ${item.entityType} (${collectedCount}/${quantity})`);
+      } catch (error) {
+        logger.error('ActionExecutor', `Failed to collect dropped ${item.entityType}: ${error.message}`);
+      }
+
+      if (collectedCount >= quantity) return;
+    }
+  }
+
+
+
+  while (collectedCount < quantity) {
     if (shouldStop()) {
       logger.info('ActionExecutor', `Stopping block collection as requested.`);
       return { collected: collectedCount, stopped: true };
     }
 
-    const blocks = bot.findBlocks({
-      matching: bot.registry.blocksByName[currentBlockType]?.id,
-      maxDistance: 32,
-      count: quantity - collectedCount,
+    // Collect any dropped items first
+    if (collectedCount >= quantity) break;
+
+    // Find nearest blocks
+    const blockPositions = bot.findBlocks({
+      matching: blocksToCollect.map(type => bot.registry.blocksByName[type]?.id).filter(id => id !== undefined),
+      maxDistance: maxSearchDistance,
+      count: 100,
     });
 
-    if (blocks.length === 0) {
-      logger.info('ActionExecutor', `No ${currentBlockType} blocks found nearby. Trying next type if available.`);
-      continue;
+    if (blockPositions.length === 0) {
+      logger.warn('ActionExecutor', `No more ${blockType} blocks found within ${maxSearchDistance} blocks.`);
+      return { collected: collectedCount, stopped: false };
     }
-  
-    logger.info('ActionExecutor', `Found ${blocks.length} ${currentBlockType} blocks. Collecting...`);
 
-    for (const blockPos of blocks) {
+    // Sort blocks by distance
+    blockPositions.sort((a, b) => bot.entity.position.distanceTo(a) - bot.entity.position.distanceTo(b));
+
+    for (const blockPos of blockPositions) {
+      await collectDroppedItems();
+
       if (shouldStop()) {
         logger.info('ActionExecutor', `Stopping block collection as requested.`);
         return { collected: collectedCount, stopped: true };
       }
 
-      if (collectedCount >= quantity) break;
-
       const block = bot.blockAt(blockPos);
-      if (!block) continue;
+      if (!block || block.name === 'air') {
+        logger.debug('ActionExecutor', `Skipping invalid block at ${blockPos}`);
+        continue;
+      }
+
+      if (!blocksToCollect.includes(block.name)) {
+        logger.debug('ActionExecutor', `Skipping non-target block ${block.name} at ${blockPos}`);
+        continue;
+      }
 
       try {
-        await bot.pathfinder.goto(new GoalBlock(block.position.x, block.position.y, block.position.z));
+        // Move to the block
+        await bot.pathfinder.goto(new GoalBlock(blockPos.x, blockPos.y, blockPos.z));
+
+        // Check if we can actually reach the block
+        if (bot.entity.position.distanceTo(blockPos) > 4) {
+          logger.warn('ActionExecutor', `Unable to reach block at ${blockPos}. Skipping.`);
+          continue;
+        }
+
+        // Dig the block
+        logger.info('ActionExecutor', `Attempting to dig ${block.name} at ${blockPos}`);
         await bot.dig(block);
+        await collectDroppedItems();
         collectedCount++;
-        logger.info('ActionExecutor', `Collected ${currentBlockType} (${collectedCount}/${quantity})`);
+        logger.info('ActionExecutor', `Collected dropped items after digging ${block.name} at ${blockPos}`);
+        logger.info('ActionExecutor', `Collected ${collectedCount}/${quantity}`);
+        // Check if inventory is full
+        if (bot.inventory.emptySlotCount() === 0) {
+          logger.warn('ActionExecutor', `Inventory full. Stopping collection.`);
+          return { collected: collectedCount, stopped: false, reason: 'inventory_full' };
+        }
+
       } catch (error) {
-        logger.error('ActionExecutor', `Failed to collect ${currentBlockType}: ${error.message}`);
+        logger.error('ActionExecutor', `Error collecting ${block.name} at ${blockPos}: ${error.message}`);
       }
+
+      if (collectedCount >= quantity) break;
     }
 
-    if (collectedCount >= quantity) break;
+    // If we've collected some blocks but not all, and can't find more nearby, increase search distance
+    if (collectedCount > 0 && collectedCount < quantity) {
+      maxSearchDistance *= 1.5;
+      logger.info('ActionExecutor', `Increasing search distance to ${maxSearchDistance} blocks`);
+    }
   }
 
-  if (collectedCount === 0) {
-    logger.warn('ActionExecutor', `No ${blockType} blocks found nearby.`);
-    return { collected: 0, stopped: false };
-  } else if (collectedCount < quantity) {
-    logger.info('ActionExecutor', `Partially completed ${blockType} collection. Collected ${collectedCount}/${quantity}`);
-  } else {
-    logger.info('ActionExecutor', `Finished collecting ${blockType}`);
-  }
-
+  logger.info('ActionExecutor', `Finished collecting ${blockType}. Total collected: ${collectedCount}`);
   return { collected: collectedCount, stopped: false };
 });
 
@@ -386,7 +446,7 @@ actionRegistry.registerAction('craft', async function({ itemName, quantity }, bo
   }
 });
 
-actionRegistry.registerAction('cancelGoal', async function({ goalId }, bot, goalManager, shouldStop) {
+actionRegistry.registerAction('cancelGoalById', async function({ goalId }, bot, goalManager, shouldStop) {
   logger.info('ActionExecutor', `Attempting to cancel goal with ID: ${goalId}`);
   const cancelledGoal = goalManager.cancelGoalById(goalId);
   if (cancelledGoal) {

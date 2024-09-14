@@ -121,8 +121,6 @@ function generatePrompt(username, message, bot) {
     - Time: ${bot.time}
     - Current Goals:
     ${currentGoalsString}
-    - Recent Interactions:
-    ${recentInteractions}
   `;
 
   const availableActions = Array.from(actionRegistry.actions.keys()).map(action => {

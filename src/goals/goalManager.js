@@ -10,15 +10,15 @@ const GoalAddOutcome = {
   IGNORED_ONGOING: 'IGNORED_ONGOING',
   STOPPED_EXISTING: 'STOPPED_EXISTING'
 };
-
 class GoalManager {
   constructor(bot) {
+    this.bot = bot;
     this.goalQueue = new GoalQueue();
     this.isProcessing = false;
     this.currentGoal = null;
     this.ongoingActions = new Map(); // Track ongoing actions
     this.goalCooldowns = new Map(); // Track cooldowns for goal types
-    this.actionExecutor = new ActionExecutor(bot);
+    this.actionExecutor = new ActionExecutor(bot, this);
   }
 
   /**
@@ -29,6 +29,12 @@ class GoalManager {
   addGoal(goalData) {
     const { intent, actions, priority } = goalData;
     const newGoal = new Goal(intent, actions, priority);
+
+    // Check if this is a cancel goal action
+    if (actions[0].type === 'cancelGoal') {
+      logger.info('GoalManager', `Executing cancel goal action immediately for goal ID: ${actions[0].parameters.goalId}`);
+      return this.executeCancelGoalAction(actions[0].parameters.goalId);
+    }
 
     if (this.isStopAction(actions[0])) {
       return this.handleStopAction(actions[0]);
@@ -289,9 +295,18 @@ class GoalManager {
       logger.info('GoalManager', `Stopping current goal: "${this.currentGoal.intent}"`);
       this.currentGoal.stopSignal = true;
       this.currentGoal.status = 'stopped';
+      // Interrupt the current action
+      if (this.actionExecutor.currentAction) {
+        this.actionExecutor.stopCurrentAction();
+      }
+      const stoppedGoal = this.currentGoal;
+      this.currentGoal = null;
+      this.isProcessing = false;
       this.logGoalState();
+      return stoppedGoal;
     } else {
       logger.warn('GoalManager', 'No active goal to stop');
+      return null;
     }
   }
 
@@ -343,6 +358,50 @@ class GoalManager {
       totalGoals: this.goalQueue.length + (this.currentGoal ? 1 : 0)
     };
   }
+
+  getCurrentGoals() {
+    const currentGoals = [];
+    if (this.currentGoal) {
+      currentGoals.push({
+        id: this.currentGoal.id,
+        intent: this.currentGoal.intent,
+        status: this.currentGoal.status
+      });
+    }
+    this.goalQueue.goals.forEach(goal => {
+      currentGoals.push({
+        id: goal.id,
+        intent: goal.intent,
+        status: goal.status
+      });
+    });
+    return currentGoals;
+  }
+
+  cancelGoalById(goalId) {
+    if (this.currentGoal && this.currentGoal.id === goalId) {
+      const cancelledGoal = this.stopCurrentGoal();
+      logger.info('GoalManager', `Cancelled current goal with ID: ${goalId}`);
+      return cancelledGoal;
+    }
+    const cancelledGoal = this.goalQueue.removeById(goalId);
+    if (cancelledGoal) {
+      logger.info('GoalManager', `Cancelled queued goal with ID: ${goalId}`);
+      return cancelledGoal;
+    }
+    logger.warn('GoalManager', `No goal found with ID: ${goalId}`);
+    return null;
+  }
+
+  executeCancelGoalAction(goalId) {
+    const cancelledGoal = this.cancelGoalById(goalId);
+    return {
+      outcome: cancelledGoal ? GoalAddOutcome.STOPPED_EXISTING : GoalAddOutcome.IGNORED_ONGOING,
+      goal: cancelledGoal
+    };
+  }
 }
+
+
 
 module.exports = { GoalManager, GoalAddOutcome };

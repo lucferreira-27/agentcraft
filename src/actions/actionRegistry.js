@@ -31,20 +31,19 @@ function validateEquipmentSlot(slot) {
 }
 
 class Action {
-  constructor(execute, bot) {
-    this.execute = (parameters, shouldStop) => execute.call({ bot }, parameters, shouldStop);
-    this.bot = bot;
+  constructor(execute) {
+    this.execute = (parameters, bot, goalManager, shouldStop) => 
+      execute(parameters, bot, goalManager, shouldStop);
   }
 }
 
 class ActionRegistry {
-  constructor(bot) {
+  constructor() {
     this.actions = new Map();
-    this.bot = bot;
   }
 
   registerAction(name, executeFn) {
-    this.actions.set(name, new Action(executeFn, this.bot));
+    this.actions.set(name, new Action(executeFn));
   }
 
   getAction(name) {
@@ -52,11 +51,11 @@ class ActionRegistry {
   }
 }
 
-const actionRegistry = new ActionRegistry(botManager.getBot());
+const actionRegistry = new ActionRegistry();
 
 // Register actions
-actionRegistry.registerAction('followPlayer', async function({ username, stopAtPlayerPosition, duration }, shouldStop) {
-  const targetPlayer = this.bot.players[username]?.entity;
+actionRegistry.registerAction('followPlayer', async function({ username, stopAtPlayerPosition, duration }, bot, goalManager, shouldStop) {
+  const targetPlayer = bot.players[username]?.entity;
   if (!targetPlayer) throw new Error(`Player ${username} not found.`);
 
   // Set duration to effectively infinite if stopAtPlayerPosition is true
@@ -84,15 +83,15 @@ actionRegistry.registerAction('followPlayer', async function({ username, stopAtP
         return;
       }
 
-      const distance = this.bot.entity.position.distanceTo(targetPlayer.position);
+      const distance = bot.entity.position.distanceTo(targetPlayer.position);
       if (distance > 3) {
         closePositionCount = 0;
         const goal = new GoalNear(targetPlayer.position.x, targetPlayer.position.y, targetPlayer.position.z, 2);
-        this.bot.pathfinder.setGoal(goal);
+        bot.pathfinder.setGoal(goal);
       } else if (stopAtPlayerPosition) {
         closePositionCount++;
         if (closePositionCount >= 5) { // Check if bot has been close for 5 consecutive checks
-          const finalDistance = this.bot.entity.position.distanceTo(targetPlayer.position);
+          const finalDistance = bot.entity.position.distanceTo(targetPlayer.position);
           if (finalDistance <= 3) {
             clearInterval(followInterval);
             logger.info('ActionExecutor', `Reached player ${username}'s position (distance: ${finalDistance.toFixed(2)})`);
@@ -118,7 +117,7 @@ actionRegistry.registerAction('followPlayer', async function({ username, stopAtP
   });
 });
 
-actionRegistry.registerAction('collectBlock', async function({ blockType, quantity }, shouldStop) {
+actionRegistry.registerAction('collectBlock', async function({ blockType, quantity }, bot, goalManager, shouldStop) {
   const blocksToCollect = blockTypeMapping[blockType] || [blockType];
   let collectedCount = 0;
 
@@ -128,8 +127,8 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
       return { collected: collectedCount, stopped: true };
     }
 
-    const blocks = this.bot.findBlocks({
-      matching: this.bot.registry.blocksByName[currentBlockType]?.id,
+    const blocks = bot.findBlocks({
+      matching: bot.registry.blocksByName[currentBlockType]?.id,
       maxDistance: 32,
       count: quantity - collectedCount,
     });
@@ -138,7 +137,7 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
       logger.info('ActionExecutor', `No ${currentBlockType} blocks found nearby. Trying next type if available.`);
       continue;
     }
-
+  
     logger.info('ActionExecutor', `Found ${blocks.length} ${currentBlockType} blocks. Collecting...`);
 
     for (const blockPos of blocks) {
@@ -149,12 +148,12 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
 
       if (collectedCount >= quantity) break;
 
-      const block = this.bot.blockAt(blockPos);
+      const block = bot.blockAt(blockPos);
       if (!block) continue;
 
       try {
-        await this.bot.pathfinder.goto(new GoalBlock(block.position.x, block.position.y, block.position.z));
-        await this.bot.dig(block);
+        await bot.pathfinder.goto(new GoalBlock(block.position.x, block.position.y, block.position.z));
+        await bot.dig(block);
         collectedCount++;
         logger.info('ActionExecutor', `Collected ${currentBlockType} (${collectedCount}/${quantity})`);
       } catch (error) {
@@ -167,7 +166,7 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
 
   if (collectedCount === 0) {
     logger.warn('ActionExecutor', `No ${blockType} blocks found nearby.`);
-    throw new Error(`No ${blockType} blocks found nearby.`);
+    return { collected: 0, stopped: false };
   } else if (collectedCount < quantity) {
     logger.info('ActionExecutor', `Partially completed ${blockType} collection. Collected ${collectedCount}/${quantity}`);
   } else {
@@ -177,19 +176,19 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
   return { collected: collectedCount, stopped: false };
 });
 
-actionRegistry.registerAction('buildStructure', async function({ structureType, location }) {
+actionRegistry.registerAction('buildStructure', async function({ structureType, location }, bot, goalManager, shouldStop) {
   logger.info('ActionExecutor', `Building structure: ${structureType} at (${location.x}, ${location.y}, ${location.z}).`);
   
   // Basic implementation for a 3x3x3 cube
   const startPos = new Vec3(location.x, location.y, location.z);
-  const buildingBlock = this.bot.registry.blocksByName['stone'];
+  const buildingBlock = bot.registry.blocksByName['stone'];
 
   for (let x = 0; x < 3; x++) {
     for (let y = 0; y < 3; y++) {
       for (let z = 0; z < 3; z++) {
         const pos = startPos.offset(x, y, z);
         try {
-          await this.bot.placeBlock(buildingBlock, pos);
+          await bot.placeBlock(buildingBlock, pos);
           logger.info('ActionExecutor', `Placed block at (${pos.x}, ${pos.y}, ${pos.z})`);
         } catch (error) {
           logger.error('ActionExecutor', `Failed to place block at (${pos.x}, ${pos.y}, ${pos.z}): ${error.message}`);
@@ -201,7 +200,7 @@ actionRegistry.registerAction('buildStructure', async function({ structureType, 
   logger.info('ActionExecutor', `Finished building ${structureType}`);
 });
 
-actionRegistry.registerAction('attackEntity', async function({ entityType }, shouldStop) {
+actionRegistry.registerAction('attackEntity', async function({ entityType }, bot, goalManager, shouldStop) {
   logger.info('ActionExecutor', `Searching for ${entityType} to attack`);
   
   const maxSearchTime = 30000; // Maximum search time: 30 seconds
@@ -214,8 +213,8 @@ actionRegistry.registerAction('attackEntity', async function({ entityType }, sho
       return { stopped: true };
     }
 
-    target = Object.values(this.bot.entities).find(entity => 
-      entity.name === entityType && this.bot.entity.position.distanceTo(entity.position) <= 32
+    target = Object.values(bot.entities).find(entity => 
+      entity.name === entityType && bot.entity.position.distanceTo(entity.position) <= 32
     );
 
     if (!target) {
@@ -226,7 +225,7 @@ actionRegistry.registerAction('attackEntity', async function({ entityType }, sho
     logger.info('ActionExecutor', `Found ${entityType} at ${target.position}. Moving closer.`);
 
     try {
-      await this.bot.pathfinder.goto(new GoalNear(target.position.x, target.position.y, target.position.z, 3));
+      await bot.pathfinder.goto(new GoalNear(target.position.x, target.position.y, target.position.z, 3));
     } catch (error) {
       logger.warn('ActionExecutor', `Failed to reach ${entityType}: ${error.message}`);
       target = null; // Reset target and continue searching
@@ -249,7 +248,7 @@ actionRegistry.registerAction('attackEntity', async function({ entityType }, sho
         return;
       }
 
-      const visibleEntity = this.bot.entityAtCursor(4); // Check if entity is visible within 4 blocks
+      const visibleEntity = bot.entityAtCursor(4); // Check if entity is visible within 4 blocks
 
       if (!target.isValid || target.health <= 0) {
         clearInterval(attackInterval);
@@ -258,7 +257,7 @@ actionRegistry.registerAction('attackEntity', async function({ entityType }, sho
         return;
       }
 
-      if (this.bot.health <= 5) {
+      if (bot.health <= 5) {
         clearInterval(attackInterval);
         logger.warn('ActionExecutor', `Stopping attack due to low health`);
         resolve({ stopped: false, reason: 'low_health' });
@@ -266,12 +265,12 @@ actionRegistry.registerAction('attackEntity', async function({ entityType }, sho
       }
 
       if (visibleEntity && visibleEntity.id === target.id) {
-        this.bot.attack(target);
+        bot.attack(target);
       } else {
         // If entity is not visible, try to move closer
         const targetPosition = target.position.offset(0, target.height, 0);
-        this.bot.lookAt(targetPosition);
-        this.bot.pathfinder.setGoal(new GoalNear(targetPosition.x, targetPosition.y, targetPosition.z, 3));
+        bot.lookAt(targetPosition);
+        bot.pathfinder.setGoal(new GoalNear(targetPosition.x, targetPosition.y, targetPosition.z, 3));
       }
     }, 1000);
 
@@ -284,14 +283,14 @@ actionRegistry.registerAction('attackEntity', async function({ entityType }, sho
   });
 });
 
-actionRegistry.registerAction('say', async function({ message }) {
+actionRegistry.registerAction('say', async function({ message }, bot, goalManager, shouldStop) {
   logger.info('ActionExecutor', `Bot saying: ${message}`);
-  this.bot.chat(message);
+  bot.chat(message);
 });
 
-actionRegistry.registerAction('eat', async function({ foodName }, shouldStop) {
+actionRegistry.registerAction('eat', async function({ foodName }, bot, goalManager, shouldStop) {
   logger.info('ActionExecutor', `Attempting to eat ${foodName}`);
-  const food = this.bot.inventory.items().find(item => item.name === foodName);
+  const food = bot.inventory.items().find(item => item.name === foodName);
   
   if (!food) {
     logger.warn('ActionExecutor', `${foodName} not found in inventory`);
@@ -299,8 +298,8 @@ actionRegistry.registerAction('eat', async function({ foodName }, shouldStop) {
   }
 
   try {
-    await this.bot.equip(food, 'hand');
-    await this.bot.consume();
+    await bot.equip(food, 'hand');
+    await bot.consume();
     logger.info('ActionExecutor', `Successfully ate ${foodName}`);
   } catch (error) {
     logger.error('ActionExecutor', `Failed to eat ${foodName}: ${error.message}`);
@@ -308,9 +307,9 @@ actionRegistry.registerAction('eat', async function({ foodName }, shouldStop) {
   }
 });
 
-actionRegistry.registerAction('dropItems', async function({ itemName, quantity }, shouldStop) {
+actionRegistry.registerAction('dropItems', async function({ itemName, quantity }, bot, goalManager, shouldStop) {
   logger.info('ActionExecutor', `Attempting to drop ${quantity} ${itemName}`);
-  const item = this.bot.inventory.items().find(item => item.name === itemName);
+  const item = bot.inventory.items().find(item => item.name === itemName);
   
   if (!item) {
     logger.warn('ActionExecutor', `${itemName} not found in inventory`);
@@ -318,7 +317,7 @@ actionRegistry.registerAction('dropItems', async function({ itemName, quantity }
   }
 
   try {
-    await this.bot.toss(item.type, null, quantity);
+    await bot.toss(item.type, null, quantity);
     logger.info('ActionExecutor', `Successfully dropped ${quantity} ${itemName}`);
   } catch (error) {
     logger.error('ActionExecutor', `Failed to drop ${itemName}: ${error.message}`);
@@ -326,9 +325,9 @@ actionRegistry.registerAction('dropItems', async function({ itemName, quantity }
   }
 });
 
-actionRegistry.registerAction('equip', async function({ itemName, destination }, shouldStop) {
+actionRegistry.registerAction('equip', async function({ itemName, destination }, bot, goalManager, shouldStop) {
   logger.info('ActionExecutor', `Attempting to equip ${itemName} to ${destination}`);
-  const item = this.bot.inventory.items().find(item => item.name === itemName);
+  const item = bot.inventory.items().find(item => item.name === itemName);
   
   if (!item) {
     logger.warn('ActionExecutor', `${itemName} not found in inventory`);
@@ -337,7 +336,7 @@ actionRegistry.registerAction('equip', async function({ itemName, destination },
 
   try {
     const validDestination = validateEquipmentSlot(destination);
-    await this.bot.equip(item, validDestination);
+    await bot.equip(item, validDestination);
     logger.info('ActionExecutor', `Successfully equipped ${itemName} to ${validDestination}`);
   } catch (error) {
     logger.error('ActionExecutor', `Failed to equip ${itemName}: ${error.message}`);
@@ -345,10 +344,10 @@ actionRegistry.registerAction('equip', async function({ itemName, destination },
   }
 });
 
-actionRegistry.registerAction('unequip', async function({ destination }, shouldStop) {
+actionRegistry.registerAction('unequip', async function({ destination }, bot, goalManager, shouldStop) {
   logger.info('ActionExecutor', `Attempting to unequip item from ${destination}`);
   try {
-    await this.bot.unequip(destination);
+    await bot.unequip(destination);
     logger.info('ActionExecutor', `Successfully unequipped item from ${destination}`);
   } catch (error) {
     logger.error('ActionExecutor', `Failed to unequip from ${destination}: ${error.message}`);
@@ -356,12 +355,12 @@ actionRegistry.registerAction('unequip', async function({ destination }, shouldS
   }
 });
 
-actionRegistry.registerAction('jump', async function() {
+actionRegistry.registerAction('jump', async function(parameters, bot, goalManager, shouldStop) {
   logger.info('ActionExecutor', 'Attempting to jump');
   try {
-    await this.bot.setControlState('jump', true);
+    await bot.setControlState('jump', true);
     await new Promise(resolve => setTimeout(resolve, 250)); // Jump duration
-    await this.bot.setControlState('jump', false);
+    await bot.setControlState('jump', false);
     logger.info('ActionExecutor', 'Successfully jumped');
   } catch (error) {
     logger.error('ActionExecutor', `Failed to jump: ${error.message}`);
@@ -369,9 +368,9 @@ actionRegistry.registerAction('jump', async function() {
   }
 });
 
-actionRegistry.registerAction('craft', async function({ itemName, quantity }, shouldStop) {
+actionRegistry.registerAction('craft', async function({ itemName, quantity }, bot, goalManager, shouldStop) {
   logger.info('ActionExecutor', `Attempting to craft ${quantity} ${itemName}`);
-  const recipe = this.bot.recipesFor(itemName)[0];
+  const recipe = bot.recipesFor(itemName)[0];
   
   if (!recipe) {
     logger.warn('ActionExecutor', `No recipe found for ${itemName}`);
@@ -379,11 +378,23 @@ actionRegistry.registerAction('craft', async function({ itemName, quantity }, sh
   }
 
   try {
-    await this.bot.craft(recipe, quantity);
+    await bot.craft(recipe, quantity);
     logger.info('ActionExecutor', `Successfully crafted ${quantity} ${itemName}`);
   } catch (error) {
     logger.error('ActionExecutor', `Failed to craft ${itemName}: ${error.message}`);
     throw error;
+  }
+});
+
+actionRegistry.registerAction('cancelGoal', async function({ goalId }, bot, goalManager, shouldStop) {
+  logger.info('ActionExecutor', `Attempting to cancel goal with ID: ${goalId}`);
+  const cancelledGoal = goalManager.cancelGoalById(goalId);
+  if (cancelledGoal) {
+    logger.info('ActionExecutor', `Successfully cancelled goal with ID: ${goalId}`);
+    return { cancelled: true, goal: cancelledGoal };
+  } else {
+    logger.warn('ActionExecutor', `Failed to cancel goal with ID: ${goalId}. Goal not found.`);
+    return { cancelled: false, goal: null };
   }
 });
 

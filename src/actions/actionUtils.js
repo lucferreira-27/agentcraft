@@ -48,6 +48,9 @@ const parameterSchemas = {
     itemName: Joi.string().required(),
     quantity: Joi.number().integer().min(1).required(),
     stop: Joi.boolean().default(false).optional()
+  }),
+  cancelGoal: Joi.object({
+    goalId: Joi.string().required()
   })
 };
 

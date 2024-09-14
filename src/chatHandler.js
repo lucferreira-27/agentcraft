@@ -108,12 +108,19 @@ function generatePrompt(username, message, bot) {
     .map(interaction => `Player (${interaction.user}): "${interaction.message}"`)
     .join('\n');
 
+  const currentGoals = goalManager.getCurrentGoals();
+  const currentGoalsString = currentGoals.length > 0
+    ? currentGoals.map(goal => `- ${goal.intent} (ID: ${goal.id}, Status: ${goal.status})`).join('\n')
+    : 'No current goals';
+
   const currentState = `
     Agent State:
     - Position: (${bot.entity.position.x.toFixed(2)}, ${bot.entity.position.y.toFixed(2)}, ${bot.entity.position.z.toFixed(2)})
     - Health: ${bot.health}
     - Inventory: [${bot.inventory.items().map(item => item.name).join(', ')}]
     - Time: ${bot.time}
+    - Current Goals:
+    ${currentGoalsString}
     - Recent Interactions:
     ${recentInteractions}
   `;
@@ -148,7 +155,7 @@ function generatePrompt(username, message, bot) {
   logger.info('ChatHandler', `Available actions: ${availableActions}`);
 
   return `
-    You are an AI companion in a Minecraft game, assisting the player by understanding and responding to their messages. Your responses MUST be either conversational or action-based, depending on the player's request.
+    You are an AI companion in a Minecraft game, assisting the player by understanding and responding to their messages. Your responses MUST be either conversational or action-based, depending on the player's request. You now have the ability to view and cancel ongoing goals.
 
     Current game state:
     ${currentState}
@@ -172,6 +179,7 @@ function generatePrompt(username, message, bot) {
        - Stopping ongoing actions
     3. ONLY use actions listed in the available actions. DO NOT invent new ones.
     4. To stop an ongoing action, use the 'action' type with the 'stop' parameter set to true.
+    5. To cancel an ongoing goal, use the 'action' type with a 'cancelGoal' action.
 
     IMPORTANT ACTION NOTES:
     - collectBlock: Use general terms (wood, dirt, stone) unless a specific block is mentioned.
@@ -190,6 +198,23 @@ function generatePrompt(username, message, bot) {
             'parameters': {
               [key: string]: any,
               stop?: boolean  // Use to stop an ongoing action
+            }
+          }
+        ]
+      }
+    }
+
+    For canceling a goal:
+    {
+      'type': 'action',
+      'goal': {
+        'intent': 'Cancel specific goal',
+        'priority': 1,
+        'actions': [
+          {
+            'type': 'cancelGoal',
+            'parameters': {
+              'goalId': string  // The ID of the goal to cancel
             }
           }
         ]
@@ -294,6 +319,25 @@ function generatePrompt(username, message, bot) {
         ]
       }
     }
+
+    7. Canceling a goal:
+    {
+      'type': 'action',
+      'goal': {
+        'intent': 'Cancel specific goal',
+        'priority': 1,
+        'actions': [
+          {
+            'type': 'cancelGoal',
+            'parameters': {
+              'goalId': '1234-5678-90ab-cdef'  // Example goal ID
+            }
+          }
+        ]
+      }
+    }
+
+
 
     REMEMBER:
     - Always respond with a valid JSON object matching the schema.

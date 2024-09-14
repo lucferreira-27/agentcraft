@@ -52,7 +52,7 @@ class GoalQueue {
     if (index !== -1) {
       return this.goals.splice(index, 1)[0];
     }
-    return undefined;
+    return null;
   }
 }
 

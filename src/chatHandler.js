@@ -4,18 +4,27 @@ const { GoalManager, GoalAddOutcome } = require('./goals/goalManager');
 const Memory = require('./memory');
 const botManager = require('./botManager');
 const logger = require('./logger');
-const actionRegistry = require('./actionRegistry');
+const actionRegistry = require('./actions/actionRegistry.js');
+const { parameterSchemas } = require('./actions/actionUtils');
 
-
-const goalManager = new GoalManager();
+let goalManager;
 
 function ensureBotReady() {
   return new Promise((resolve) => {
     const bot = botManager.getBot();
     if (bot && bot.chat && typeof bot.chat === 'function') {
+      if (!goalManager) {
+        goalManager = new GoalManager(bot);
+      }
       resolve(bot);
     } else {
-      botManager.once('ready', () => resolve(botManager.getBot()));
+      botManager.once('ready', () => {
+        const readyBot = botManager.getBot();
+        if (!goalManager) {
+          goalManager = new GoalManager(readyBot);
+        }
+        resolve(readyBot);
+      });
     }
   });
 }
@@ -109,34 +118,34 @@ function generatePrompt(username, message, bot) {
     ${recentInteractions}
   `;
 
-  const availableActions = Object.keys(actionRegistry).map(action => {
-    const params = actionRegistry[action].toString()
-      .match(/\(.*?\)/)[0]
-      .replace(/[()]/g, '')
-      .split(',')
-      .map(param => param.trim())
-      .filter(param => param !== 'shouldStop'); // Remove shouldStop from the displayed parameters
-
-    let formattedParams = params.map(param => {
-      return param;
-    });
-
-    // Add specific parameters for followPlayer
-    if (action === 'followPlayer') {
-      formattedParams = formattedParams.filter(param => param !== 'duration');
-      formattedParams.push('stopAtPlayerPosition: boolean');
-      formattedParams.push('durationInMs: number');
+  const availableActions = Array.from(actionRegistry.actions.keys()).map(action => {
+    const schema = parameterSchemas[action];
+    if (!schema) {
+      return `  ${action}:\n    Parameters: Unknown`;
     }
 
+    const formattedParams = Object.keys(schema.describe().keys).map(key => {
+      const param = schema.describe().keys[key];
+      let paramString = `${key}: ${param.type}`;
+      if (param.flags && param.flags.presence === 'required') {
+        paramString += ' (required)';
+      }
+      if (param.valids && param.valids.length > 0) {
+        paramString += ` (${param.valids.join('|')})`;
+      }
+      return paramString;
+    });
+
     // Add 'stop' option for actions that can be stopped
-    const stoppableActions = ['followPlayer', 'moveTo', 'collectBlock', 'buildStructure', 'attackEntity'];
+    const stoppableActions = ['followPlayer', 'collectBlock', 'attackEntity'];
     if (stoppableActions.includes(action)) {
       formattedParams.push('stop: boolean');
     }
 
-    return `  ${action}:
-    Parameters: ${formattedParams.join(', ')}`;
+    return `  ${action}:\n    Parameters: ${formattedParams.join(', ')}`;
   }).join('\n\n');
+
+  logger.info('ChatHandler', `Available actions: ${availableActions}`);
 
   return `
     You are an AI companion in a Minecraft game, assisting the player by understanding and responding to their messages.
@@ -187,7 +196,7 @@ ${availableActions}
             'type': string,
             'parameters': {
               [key: string]: string | number | boolean | string[] | object,
-              stop?: boolean  // Include this to stop an ongoing action
+              stop?: boolean  // Include this to stop an ongoing action, so you gonna use when need to stop the action, rather then starting a new action
             }
           }
         ]

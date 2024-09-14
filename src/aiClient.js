@@ -71,7 +71,7 @@ async function handleActionError(goal, action, error) {
     goal: goal.intent,
     failedAction: action.type,
     error: error.message,
-    availableActions: Object.keys(require('./actionRegistry'))
+    availableActions: Object.keys(require('./actions/actionRegistry'))
   };
 
   const prompt = `

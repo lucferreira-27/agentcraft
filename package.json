@@ -3,6 +3,7 @@
     "@google/generative-ai": "^0.19.0",
     "axios": "^1.7.7",
     "dotenv": "^16.4.5",
+    "joi": "^17.13.3",
     "mineflayer": "^4.20.1",
     "mineflayer-collectblock": "^1.4.1",
     "mineflayer-pathfinder": "^2.4.5",

@@ -1,6 +1,6 @@
 const Goal = require('./Goal');
 const GoalQueue = require('./GoalQueue');
-const ActionExecutor = require('../actionExecutor');
+const ActionExecutor = require('../actions/ActionExecutor');
 const logger = require('../logger');
 
 const GoalAddOutcome = {
@@ -12,12 +12,13 @@ const GoalAddOutcome = {
 };
 
 class GoalManager {
-  constructor() {
+  constructor(bot) {
     this.goalQueue = new GoalQueue();
     this.isProcessing = false;
     this.currentGoal = null;
     this.ongoingActions = new Map(); // Track ongoing actions
     this.goalCooldowns = new Map(); // Track cooldowns for goal types
+    this.actionExecutor = new ActionExecutor(bot);
   }
 
   /**
@@ -83,6 +84,7 @@ class GoalManager {
   isOngoingAction(action) {
     return this.ongoingActions.has(action.type);
   }
+  
 
   /**
    * Handle an ongoing action
@@ -251,7 +253,7 @@ class GoalManager {
       this.ongoingActions.set(action.type, goal);
 
       try {
-        const result = await ActionExecutor.executeAction(action, () => goal.stopSignal);
+        const result = await this.actionExecutor.executeAction(action.type, action.parameters, () => goal.stopSignal);
 
         this.ongoingActions.delete(action.type);
 
@@ -260,7 +262,7 @@ class GoalManager {
           break;
         }
 
-        if (action.type === 'followPlayer' && result.reached) {
+        if (action.type === 'followPlayer' && result.reason === 'reached_position') {
           logger.info('GoalManager', `Player reached, continuing to next action`);
           continue;
         }

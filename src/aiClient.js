@@ -36,20 +36,13 @@ const model = genAI.getGenerativeModel({
 
 async function getAIResponse(prompt, context = {}) {
   try {
-    const fullPrompt = `
-${prompt}
 
-Context:
-${JSON.stringify(context, null, 2)}
 
-Please provide a response that takes into account any errors or issues mentioned in the context.
-`;
-
-    logger.info('AIClient', `Sending prompt to Gemini API: ${fullPrompt.substring(0, 100)}...`);
+    logger.info('AIClient', `Sending prompt to Gemini API: ${prompt.substring(0, 100)}...`);
     const startTime = Date.now();
     
     const result = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: fullPrompt }]}],
+      contents: [{ role: "user", parts: [{ text: prompt }]}],
     });
 
     const response = result.response;

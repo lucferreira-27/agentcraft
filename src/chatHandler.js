@@ -1,10 +1,13 @@
 const { getAIResponse } = require('./aiClient');
 const CommandParser = require('./commandParser');
-const { goalManager, GoalAddOutcome } = require('./goalManager');
+const { GoalManager, GoalAddOutcome } = require('./goals/goalManager');
 const Memory = require('./memory');
 const botManager = require('./botManager');
 const logger = require('./logger');
 const actionRegistry = require('./actionRegistry');
+
+
+const goalManager = new GoalManager();
 
 function ensureBotReady() {
   return new Promise((resolve) => {

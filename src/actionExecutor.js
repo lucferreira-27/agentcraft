@@ -18,7 +18,7 @@ async function executeActions(actions, shouldStop) {
 }
 
 async function executeAction(action, shouldStop) {
-  logger.info('ActionExecutor', `Starting execution of action: ${action.type}`);
+  logger.info('ActionExecutor', `${shouldStop ? 'Stopping' : 'Starting'} execution of action: ${action.type}`);
   logger.info('ActionExecutor', `Action parameters: ${JSON.stringify(action.parameters)}`);
   
   const startTime = Date.now();

@@ -1,6 +1,6 @@
 const { getAIResponse } = require('./aiClient');
 const CommandParser = require('./commandParser');
-const GoalManager = require('./goalManager');
+const { goalManager, GoalAddOutcome } = require('./goalManager');
 const Memory = require('./memory');
 const botManager = require('./botManager');
 const logger = require('./logger');
@@ -57,8 +57,27 @@ async function handleChat(username, message) {
     else if (parsedResponse.type === 'action') {
       logger.info('ChatHandler', `Adding new goal: ${parsedResponse.goal.intent}`);
       logger.info('ChatHandler', `Goal details: ${JSON.stringify(parsedResponse.goal, null, 2)}`);
-      GoalManager.addGoal(parsedResponse.goal);
-      bot.chat(`Understood, ${username}. I will ${parsedResponse.goal.intent}.`);
+      const result = goalManager.addGoal(parsedResponse.goal);
+      
+      switch (result.outcome) {
+        case GoalAddOutcome.ADDED:
+          bot.chat(`Understood, ${username}. I will ${result.goal.intent}.`);
+          break;
+        case GoalAddOutcome.UPDATED:
+          bot.chat(`I've updated my existing task to ${result.goal.intent}, ${username}.`);
+          break;
+        case GoalAddOutcome.IGNORED_COOLDOWN:
+          bot.chat(`I've recently performed a similar task, ${username}. Please wait a moment before asking again.`);
+          break;
+        case GoalAddOutcome.IGNORED_ONGOING:
+          bot.chat(`I'm already working on ${result.goal.intent}, ${username}. I'll continue with that.`);
+          break;
+        case GoalAddOutcome.STOPPED_EXISTING:
+          bot.chat(`I've stopped my current ${result.goal.intent} task as requested, ${username}.`);
+          break;
+        default:
+          bot.chat(`I've processed your request, ${username}, but I'm not sure how to respond.`);
+      }
     }
 
     else {
@@ -92,26 +111,48 @@ function generatePrompt(username, message, bot) {
       .match(/\(.*?\)/)[0]
       .replace(/[()]/g, '')
       .split(',')
-      .map(param => param.trim());
+      .map(param => param.trim())
+      .filter(param => param !== 'shouldStop'); // Remove shouldStop from the displayed parameters
+
+    let formattedParams = params.map(param => {
+      return param;
+    });
+
+    // Add specific parameters for followPlayer
     if (action === 'followPlayer') {
-      params.push('stopAtPlayerPosition: boolean');
-      params.push('duration: number');
+      formattedParams = formattedParams.filter(param => param !== 'duration');
+      formattedParams.push('stopAtPlayerPosition: boolean');
+      formattedParams.push('durationInMs: number');
     }
+
     // Add 'stop' option for actions that can be stopped
     const stoppableActions = ['followPlayer', 'moveTo', 'collectBlock', 'buildStructure', 'attackEntity'];
     if (stoppableActions.includes(action)) {
-      params.push('stop: boolean');
+      formattedParams.push('stop: boolean');
     }
-    return `${action}: { ${params.join(', ')} }`;
-  }).join('\n');
+
+    return `  ${action}:
+    Parameters: ${formattedParams.join(', ')}`;
+  }).join('\n\n');
 
   return `
     You are an AI companion in a Minecraft game, assisting the player by understanding and responding to their messages.
 
+    Your current state is:
     ${currentState}
 
-    Available Actions:
-    ${availableActions}
+    The available actions you can perform are:
+
+${availableActions}
+
+    When using these actions, remember:
+    - The 'stop' parameter is used to stop an ongoing action of the same type.
+    - Some actions like 'jump' don't require any parameters.
+
+    DON'T MAKE UP ACTIONS THAT ARE NOT IN THE LIST.
+
+    The chat history is:
+    ${recentInteractions}
 
     Player (${username}): "${message}"
 
@@ -123,6 +164,12 @@ function generatePrompt(username, message, bot) {
     - 'stone' will collect stone, cobblestone, granite, diorite, or andesite
 
     If a specific block type is mentioned, use that exact name (e.g., 'oak_log', 'cobblestone').
+
+    How to handle actions:
+    - followPlayer: Follow the player with the specified username. If stopAtPlayerPosition is true, follow until the player's position is reached. If duration is provided, follow for that duration in milliseconds.
+      - Parameters: username, stopAtPlayerPosition, durationInMs
+      - stopAtPlayerPosition: If true, the action will stop when the player's position is reached.
+      - durationInMs: The duration of the action in milliseconds. If not specified, the action will continue indefinitely until the player stops it.
 
     Use the following JSON schema for your response:
 

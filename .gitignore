@@ -1,4 +1,5 @@
 node_modules/
+logs/
 minecraft-server/
 agent.log
 .env

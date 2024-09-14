@@ -13,38 +13,32 @@ const blockTypeMapping = {
   // Add more mappings as needed
 };
 
+const equipmentSlots = {
+  'mainhand': 'hand',
+  'offhand': 'off-hand',
+  'head': 'head',
+  'chest': 'torso',
+  'legs': 'legs',
+  'feet': 'feet'
+};
+
+function validateEquipmentSlot(slot) {
+  const validSlot = equipmentSlots[slot.toLowerCase()] || slot;
+  if (!Object.values(equipmentSlots).includes(validSlot)) {
+    throw new Error(`Invalid equipment slot: ${slot}`);
+  }
+  return validSlot;
+}
+
 const actionRegistry = {
-  moveTo: async ({ position }, shouldStop) => {
-    logger.info('ActionExecutor', `Moving to position: (${position.x}, ${position.y}, ${position.z})`);
-    const goal = new GoalNear(position.x, position.y, position.z, 1);
-    bot.pathfinder.setGoal(goal);
 
-    return new Promise((resolve, reject) => {
-      bot.once('goal_reached', () => {
-        logger.info('ActionExecutor', `Reached position (${position.x}, ${position.y}, ${position.z}).`);
-        resolve();
-      });
-
-      bot.once('path_update', (r) => {
-        if (r.status === 'noPath') {
-          logger.warn('ActionExecutor', 'No path to the target location.');
-          reject(new Error('No path to the target location.'));
-        }
-      });
-
-      setTimeout(() => {
-        logger.warn('ActionExecutor', 'Timeout while moving to position.');
-        reject(new Error('Timeout while moving to position.'));
-      }, 60000);
-    });
-  },
-
-  followPlayer: async ({ username, stopAtPlayerPosition, duration = 10000 }, shouldStop) => {
+  followPlayer: async ({ username, stopAtPlayerPosition, duration }, shouldStop) => {
     const targetPlayer = bot.players[username]?.entity;
     if (!targetPlayer) throw new Error(`Player ${username} not found.`);
 
     // Set duration to effectively infinite if stopAtPlayerPosition is true
-    const effectiveDuration = stopAtPlayerPosition ? Number.MAX_SAFE_INTEGER : duration;
+    const isDurationZero = duration === 0 || duration === undefined || duration === null;
+    const effectiveDuration = isDurationZero || stopAtPlayerPosition ? 2147483647 : duration;
 
     logger.info('ActionExecutor', `Starting to follow player: ${username} for ${stopAtPlayerPosition ? 'infinite' : effectiveDuration}ms`);
 
@@ -184,20 +178,77 @@ const actionRegistry = {
     logger.info('ActionExecutor', `Finished building ${structureType}`);
   },
 
-  attackEntity: async ({ entityType }) => {
-    const target = Object.values(bot.entities).find(entity => entity.name === entityType);
-    if (!target) throw new Error(`No entity of type ${entityType} found nearby.`);
+  attackEntity: async ({ entityType }, shouldStop) => {
+    logger.info('ActionExecutor', `Searching for ${entityType} to attack`);
+    
+    const maxSearchTime = 30000; // Maximum search time: 30 seconds
+    const searchStartTime = Date.now();
+    let target = null;
+
+    while (!target && Date.now() - searchStartTime < maxSearchTime) {
+      if (shouldStop()) {
+        logger.info('ActionExecutor', `Stopping entity search as requested`);
+        return { stopped: true };
+      }
+
+      target = Object.values(bot.entities).find(entity => 
+        entity.name === entityType && bot.entity.position.distanceTo(entity.position) <= 32
+      );
+
+      if (!target) {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 vf bnsecond before searching again
+        continue;
+      }
+
+      logger.info('ActionExecutor', `Found ${entityType} at ${target.position}. Moving closer.`);
+
+      try {
+        await bot.pathfinder.goto(new GoalNear(target.position.x, target.position.y, target.position.z, 3));
+      } catch (error) {
+        logger.warn('ActionExecutor', `Failed to reach ${entityType}: ${error.message}`);
+        target = null; // Reset target and continue searching
+      }
+    }
+
+    if (!target) {
+      logger.warn('ActionExecutor', `No ${entityType} found within search time`);
+      return { stopped: false, reason: 'entity_not_found' };
+    }
 
     logger.info('ActionExecutor', `Attacking ${entityType}`);
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const attackInterval = setInterval(() => {
-        if (target.isValid) {
-          bot.attack(target);
-        } else {
+        if (shouldStop()) {
+          clearInterval(attackInterval);
+          logger.info('ActionExecutor', `Stopped attacking ${entityType} as requested`);
+          resolve({ stopped: true });
+          return;
+        }
+
+        const visibleEntity = bot.entityAtCursor(4); // Check if entity is visible within 4 blocks
+
+        if (!target.isValid || target.health <= 0) {
           clearInterval(attackInterval);
           logger.info('ActionExecutor', `${entityType} defeated`);
-          resolve();
+          resolve({ stopped: false, reason: 'entity_defeated' });
+          return;
+        }
+
+        if (bot.health <= 5) {
+          clearInterval(attackInterval);
+          logger.warn('ActionExecutor', `Stopping attack due to low health`);
+          resolve({ stopped: false, reason: 'low_health' });
+          return;
+        }
+
+        if (visibleEntity && visibleEntity.id === target.id) {
+          bot.attack(target);
+        } else {
+          // If entity is not visible, try to move closer
+          const targetPosition = target.position.offset(0, target.height, 0);
+          bot.lookAt(targetPosition);
+          bot.pathfinder.setGoal(new GoalNear(targetPosition.x, targetPosition.y, targetPosition.z, 3));
         }
       }, 1000);
 
@@ -205,7 +256,7 @@ const actionRegistry = {
       setTimeout(() => {
         clearInterval(attackInterval);
         logger.warn('ActionExecutor', `Timeout while attacking ${entityType}`);
-        reject(new Error(`Timeout while attacking ${entityType}`));
+        resolve({ stopped: false, reason: 'timeout' });
       }, 120000);
     });
   },
@@ -263,8 +314,9 @@ const actionRegistry = {
     }
 
     try {
-      await bot.equip(item, destination);
-      logger.info('ActionExecutor', `Successfully equipped ${itemName} to ${destination}`);
+      const validDestination = validateEquipmentSlot(destination);
+      await bot.equip(item, validDestination);
+      logger.info('ActionExecutor', `Successfully equipped ${itemName} to ${validDestination}`);
     } catch (error) {
       logger.error('ActionExecutor', `Failed to equip ${itemName}: ${error.message}`);
       throw error;
@@ -295,42 +347,7 @@ const actionRegistry = {
     }
   },
 
-  moveToCoordinates: async ({ x, y, z }, shouldStop) => {
-    logger.info('ActionExecutor', `Moving to coordinates: (${x}, ${y}, ${z})`);
-    const goal = new GoalNear(x, y, z, 1);
-    bot.pathfinder.setGoal(goal);
 
-    return new Promise((resolve, reject) => {
-      const checkInterval = setInterval(() => {
-        if (shouldStop()) {
-          clearInterval(checkInterval);
-          bot.pathfinder.setGoal(null);
-          logger.info('ActionExecutor', 'Movement stopped as requested');
-          resolve({ stopped: true });
-        }
-      }, 100);
-
-      bot.once('goal_reached', () => {
-        clearInterval(checkInterval);
-        logger.info('ActionExecutor', `Reached coordinates (${x}, ${y}, ${z})`);
-        resolve({ stopped: false });
-      });
-
-      bot.once('path_update', (r) => {
-        if (r.status === 'noPath') {
-          clearInterval(checkInterval);
-          logger.warn('ActionExecutor', 'No path to the target location');
-          reject(new Error('No path to the target location'));
-        }
-      });
-
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        logger.warn('ActionExecutor', 'Timeout while moving to coordinates');
-        reject(new Error('Timeout while moving to coordinates'));
-      }, 60000);
-    });
-  },
 
   craft: async ({ itemName, quantity }, shouldStop) => {
     logger.info('ActionExecutor', `Attempting to craft ${quantity} ${itemName}`);

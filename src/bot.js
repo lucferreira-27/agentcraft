@@ -34,7 +34,7 @@ setInterval(() => {
       time: bot.time,
     };
     memory.recordState(state);
-    logger.debug('BOT', 'State', 'Updated bot state', { state });
+    //logger.debug('BOT', 'State', 'Updated bot state', { state });
   }
 }, 5000);
 

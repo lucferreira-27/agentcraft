@@ -6,6 +6,7 @@ class ActionExecutor {
   constructor(bot, goalManager) {
     this.bot = bot;
     this.goalManager = goalManager;
+    this.pausedActions = new Set();
   }
 
   stopCurrentAction() {
@@ -28,8 +29,14 @@ class ActionExecutor {
       logger.debug('ACTION', 'ActionExecutor', `Executing action: ${actionName}`, { parameters: validatedParams });
 
       const startTime = Date.now();
-      const result = await action.execute(validatedParams, this.bot, this.goalManager, () => shouldStop() || this.stopSignal);
+      const shouldStopOrPaused = () => shouldStop() || this.stopSignal || this.pausedActions.has(actionName);
+      const result = await action.execute(validatedParams, this.bot, this.goalManager, shouldStopOrPaused);
       const endTime = Date.now();
+
+      if (this.stopSignal) {
+        logger.debug('ACTION', 'ActionExecutor', `Action ${actionName} interrupted`, { duration: `${endTime - startTime}ms` });
+        return { interrupted: true, partialResult: result };
+      }
 
       logger.debug('ACTION', 'ActionExecutor', `Action ${actionName} completed`, { duration: `${endTime - startTime}ms`, result });
       return result;
@@ -38,6 +45,22 @@ class ActionExecutor {
       throw error;
     } finally {
       this.currentAction = null;
+      this.stopSignal = false;
+    }
+  }
+
+  pauseAction(actionName) {
+    this.pausedActions.add(actionName);
+  }
+
+  resumeAction(actionName) {
+    this.pausedActions.delete(actionName);
+  }
+
+  interruptCurrentAction() {
+    if (this.currentAction) {
+      this.stopSignal = true;
+      logger.debug('ACTION', 'ActionExecutor', `Interrupting current action: ${this.currentAction}`);
     }
   }
 }

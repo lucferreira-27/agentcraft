@@ -51,6 +51,15 @@ const parameterSchemas = {
   }),
   cancelGoal: Joi.object({
     goalId: Joi.string().required()
+  }),
+  pauseGoal: Joi.object({
+    goalId: Joi.string().required()
+  }),
+  resumeGoal: Joi.object({
+    goalId: Joi.string().required()
+  }),
+  destroyGoal: Joi.object({
+    goalId: Joi.string().required()
   })
 };
 

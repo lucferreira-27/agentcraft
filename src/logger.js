@@ -11,7 +11,7 @@ class Logger {
       WARN: 2,
       ERROR: 3
     };
-    this.minLevel = this.logLevels[options.minLevel] || this.logLevels.INFO;
+    this.minLevel = this.logLevels[options.minLevel] && this.logLevels.INFO;
     this.logToFile = options.logToFile || false;
     this.logFilePath = options.logFilePath || path.join(__dirname, '../logs/bot.log');
     this.categories = options.categories || ['DEFAULT'];
@@ -105,7 +105,7 @@ const logLevel = process.env.LOG_LEVEL || 'DEBUG';
 const logCategories = ['SYSTEM', 'BOT', 'AI', 'GOAL', 'ACTION', 'CHAT'];
 
 module.exports = new Logger({
-  minLevel: logLevel,
+  minLevel:  logLevel,
   logToFile: true,
   categories: logCategories
 });

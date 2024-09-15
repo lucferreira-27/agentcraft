@@ -48,7 +48,7 @@ async function getAIResponse(prompt, context = {}) {
     logger.info('AI', 'AIClient', `Gemini API response time: ${endTime - startTime}m | Token count: ${result.response.usageMetadata?.totalTokenCount}`);
     
     const jsonResponse = response.candidates[0].content.parts[0].text;
-    logger.debug('AI', 'AIClient', 'Received JSON response from Gemini API', { responsePreview: JSON.stringify(jsonResponse).substring(0, 100) });
+    logger.debug('AI', 'AIClient', 'Received JSON response from Gemini API', { responsePreview: jsonResponse });
     
     return jsonResponse;
   } catch (error) {

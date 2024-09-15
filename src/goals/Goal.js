@@ -15,7 +15,7 @@ class Goal {
     this.timestamp = Date.now();
     this.isRunning = false;
     this.stopSignal = false;
-    this.status = 'queued'; // 'queued', 'running', 'completed', 'failed', 'stopped'
+    this.status = 'queued'; // 'queued', 'running', 'paused', 'completed', 'failed', 'stopped'
     logger.debug('GOAL', 'Goal', `Created new goal: ${this.intent}`, { id: this.id, priority: this.priority });
   }
 
@@ -42,6 +42,20 @@ class Goal {
     
     logger.debug('GOAL', 'Goal', `Goal ${this.id} is similar to ${otherGoal.id}`);
     return true;
+  }
+
+  pause() {
+    if (this.status === 'running') {
+      this.status = 'paused';
+      logger.debug('GOAL', 'Goal', `Goal paused: ${this.intent}`, { goalId: this.id });
+    }
+  }
+
+  resume() {
+    if (this.status === 'paused') {
+      this.status = 'queued';
+      logger.debug('GOAL', 'Goal', `Goal resumed: ${this.intent}`, { goalId: this.id });
+    }
   }
 }
 

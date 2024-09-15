@@ -20,6 +20,8 @@ class GoalManager {
     this.ongoingActions = new Map(); // Track ongoing actions
     this.goalCooldowns = new Map(); // Track cooldowns for goal types
     this.actionExecutor = new ActionExecutor(bot, this);
+    this.pausedGoals = new Map(); // Track paused goals
+    this.actionPauseMethods = new Map(); // Add this line
     logger.debug('GOAL', 'GoalManager', 'Goal Manager initialized');
   }
 
@@ -32,10 +34,8 @@ class GoalManager {
     const { intent, actions, priority } = goalData;
     const newGoal = new Goal(intent, actions, priority);
 
-    // Check if this is a cancel goal action
-    if (actions[0].type === 'cancelGoal') {
-      logger.info('GOAL', 'GoalManager', `Executing cancel goal action for goal ID: ${actions[0].parameters.goalId}`);
-      return this.executeCancelGoalAction(actions[0].parameters.goalId);
+    if (this.hasHighPriorityAction(actions)) {
+      return this.executeHighPriorityGoal(newGoal);
     }
 
     if (this.isStopAction(actions[0])) {
@@ -222,7 +222,13 @@ class GoalManager {
     if (this.isProcessing) return;
     this.isProcessing = true;
 
-    while (this.goalQueue.length > 0) {
+    while (this.goalQueue.length > 0 || this.pausedGoals.size > 0) {
+      if (this.goalQueue.length === 0 && this.pausedGoals.size > 0) {
+        // Resume the oldest paused goal
+        const oldestPausedGoal = Array.from(this.pausedGoals.values()).sort((a, b) => a.timestamp - b.timestamp)[0];
+        this.resumeGoal(oldestPausedGoal.id);
+      }
+
       const goal = this.goalQueue.dequeue();
       this.currentGoal = goal;
       goal.status = 'running';
@@ -268,6 +274,11 @@ class GoalManager {
 
         if (result && result.stopped) {
           logger.debug('GOAL', 'GoalManager', `Action stopped prematurely: ${action.type}`, { goalId: goal.id, collected: result.collected });
+          break;
+        }
+
+        if (result && result.reason === 'max_attempts_reached') {
+          logger.warn('GOAL', 'GoalManager', `Action reached max attempts: ${action.type}`, { goalId: goal.id });
           break;
         }
 
@@ -383,26 +394,155 @@ class GoalManager {
   }
 
   cancelGoalById(goalId) {
-    if (this.currentGoal && this.currentGoal.id === goalId) {
-      const cancelledGoal = this.stopCurrentGoal();
-      logger.info('GOAL', 'GoalManager', `Cancelled current goal with ID: ${goalId}`);
-      return cancelledGoal;
-    }
-    const cancelledGoal = this.goalQueue.removeById(goalId);
-    if (cancelledGoal) {
-      logger.info('GOAL', 'GoalManager', `Cancelled queued goal with ID: ${goalId}`);
-      return cancelledGoal;
-    }
-    logger.warn('GOAL', 'GoalManager', `No goal found with ID: ${goalId}`);
-    return null;
+    logger.warn('GOAL', 'GoalManager', `'cancelGoalById' is deprecated. Use 'destroyGoal' instead.`);
+    return this.destroyGoal(goalId);
   }
 
   executeCancelGoalAction(goalId) {
-    const cancelledGoal = this.cancelGoalById(goalId);
+    logger.warn('GOAL', 'GoalManager', `'executeCancelGoalAction' is deprecated. Use 'destroyGoal' instead.`);
+    const cancelledGoal = this.destroyGoal(goalId);
     return {
       outcome: cancelledGoal ? GoalAddOutcome.STOPPED_EXISTING : GoalAddOutcome.IGNORED_ONGOING,
       goal: cancelledGoal
     };
+  }
+
+  pauseGoal(goalId) {
+    const goal = this.currentGoal && this.currentGoal.id === goalId ? this.currentGoal : this.goalQueue.removeById(goalId);
+    if (goal) {
+      goal.pause();
+      this.pausedGoals.set(goalId, goal);
+      logger.debug('GOAL', 'GoalManager', `Paused goal: ${goal.intent}`, { goalId });
+
+      // Pause the current action if it's being paused
+      if (this.currentGoal && this.currentGoal.id === goalId) {
+        const currentAction = this.currentGoal.actions[0]; // Assuming the first action is the current one
+        this.pauseAction(currentAction.type);
+        this.actionExecutor.pauseAction(currentAction.type);
+        this.currentGoal = null;
+      }
+
+      return goal;
+    }
+    return null;
+  }
+
+  resumeGoal(goalId) {
+    const goal = this.pausedGoals.get(goalId);
+    if (goal) {
+      goal.resume();
+      this.pausedGoals.delete(goalId);
+      this.goalQueue.enqueue(goal);
+      logger.debug('GOAL', 'GoalManager', `Resumed goal: ${goal.intent}`, { goalId });
+
+      // Resume the action
+      const currentAction = goal.actions[0]; // Assuming the first action is the one to resume
+      this.resumeAction(currentAction.type);
+      this.actionExecutor.resumeAction(currentAction.type);
+
+      return goal;
+    }
+    return null;
+  }
+
+  destroyGoal(goalId) {
+    let destroyedGoal = null;
+    if (this.currentGoal && this.currentGoal.id === goalId) {
+      destroyedGoal = this.currentGoal;
+      this.currentGoal.stopSignal = true;
+      this.actionExecutor.interruptCurrentAction();
+      this.currentGoal = null;
+      this.isProcessing = false;
+      logger.debug('GOAL', 'GoalManager', `Destroyed current goal: ${goalId}`);
+    } else {
+      destroyedGoal = this.goalQueue.removeById(goalId) || this.pausedGoals.get(goalId);
+      if (destroyedGoal) {
+        this.pausedGoals.delete(goalId);
+        logger.debug('GOAL', 'GoalManager', `Destroyed goal: ${destroyedGoal.intent}`, { goalId });
+      }
+    }
+    return destroyedGoal;
+  }
+
+  executeHighPriorityAction(action) {
+    switch (action.type) {
+      case 'destroyGoal':
+        return this.executeDestroyGoalAction(action.parameters.goalId);
+      case 'pauseGoal':
+        return this.executePauseGoalAction(action.parameters.goalId);
+      case 'resumeGoal':
+        return this.executeResumeGoalAction(action.parameters.goalId);
+      default:
+        throw new Error(`Unknown high-priority action: ${action.type}`);
+    }
+  }
+
+  executeDestroyGoalAction(goalId) {
+    const destroyedGoal = this.destroyGoal(goalId);
+    return {
+      outcome: destroyedGoal ? GoalAddOutcome.STOPPED_EXISTING : GoalAddOutcome.IGNORED_ONGOING,
+      goal: destroyedGoal
+    };
+  }
+
+  executePauseGoalAction(goalId) {
+    const pausedGoal = this.pauseGoal(goalId);
+    return {
+      outcome: pausedGoal ? GoalAddOutcome.UPDATED : GoalAddOutcome.IGNORED_ONGOING,
+      goal: pausedGoal
+    };
+  }
+
+  executeResumeGoalAction(goalId) {
+    const resumedGoal = this.resumeGoal(goalId);
+    return {
+      outcome: resumedGoal ? GoalAddOutcome.UPDATED : GoalAddOutcome.IGNORED_ONGOING,
+      goal: resumedGoal
+    };
+  }
+
+  hasHighPriorityAction(actions) {
+    return actions.some(action => ['destroyGoal', 'pauseGoal', 'resumeGoal'].includes(action.type));
+  }
+
+  async executeHighPriorityGoal(goal) {
+    let result = { outcome: GoalAddOutcome.ADDED, goal: null };
+    for (const action of goal.actions) {
+      if (['destroyGoal', 'pauseGoal', 'resumeGoal'].includes(action.type)) {
+        result = this.executeHighPriorityAction(action);
+        if (result.outcome !== GoalAddOutcome.UPDATED) {
+          return result; // Stop if the high-priority action failed or was ignored
+        }
+      } else {
+        // Execute non-high-priority actions immediately
+        try {
+          await this.actionExecutor.executeAction(action.type, action.parameters, () => false);
+        } catch (error) {
+          logger.error('GOAL', 'GoalManager', `Failed to execute action: ${action.type}`, { error: error.message });
+        }
+      }
+    }
+    return result;
+  }
+
+  registerActionPauseMethod(actionType, pauseMethod) {
+    this.actionPauseMethods.set(actionType, pauseMethod);
+  }
+
+  pauseAction(actionType) {
+    logger.debug('GOAL', 'GoalManager', `Pausing action: ${actionType}`);
+    const pauseMethod = this.actionPauseMethods.get(actionType);
+    if (pauseMethod) {
+      pauseMethod();
+    }
+  }
+
+  resumeAction(actionType) {
+    logger.debug('GOAL', 'GoalManager', `Resuming action: ${actionType}`);
+    const resumeMethod = this.actionPauseMethods.get(actionType);
+    if (resumeMethod) {
+      resumeMethod();
+    }
   }
 }
 

@@ -58,32 +58,35 @@ async function handleChat(username, message) {
       logger.info('GOAL', 'ChatHandler', `Adding new goal: ${parsedResponse.goal.intent}`);
       const result = goalManager.addGoal(parsedResponse.goal);
       
-      switch (result.outcome) {
-        case GoalAddOutcome.ADDED:
-          bot.chat(`Understood, ${username}. I will ${result.goal.intent}.`);
-          break;
-        case GoalAddOutcome.UPDATED:
-          bot.chat(`I've updated my existing task to ${result.goal.intent}, ${username}.`);
-          break;
-        case GoalAddOutcome.IGNORED_COOLDOWN:
-          bot.chat(`I've recently performed a similar task, ${username}. Please wait a moment before asking again.`);
-          break;
-        case GoalAddOutcome.IGNORED_ONGOING:
-          bot.chat(`I'm already working on ${result.goal.intent}, ${username}. I'll continue with that.`);
-          break;
-        case GoalAddOutcome.STOPPED_EXISTING:
-          bot.chat(`I've stopped my current ${result.goal.intent} task as requested, ${username}.`);
-          break;
-        default:
-          bot.chat(`I've processed your request, ${username}, but I'm not sure how to respond.`);
+      let responseMessage = '';
+      for (const action of parsedResponse.goal.actions) {
+        switch (action.type) {
+          case 'pauseGoal':
+            responseMessage += `I've paused the current task. `;
+            break;
+          case 'resumeGoal':
+            responseMessage += `I'll resume the paused task after completing the current one. `;
+            break;
+          case 'destroyGoal':
+            responseMessage += `I've stopped the specified task. `;
+            break;
+          case 'collectBlock':
+            responseMessage += `I'll collect ${action.parameters.quantity} ${action.parameters.blockType}. `;
+            break;
+          // Add cases for other action types as needed
+          default:
+            responseMessage += `I'll perform a ${action.type} action. `;
+        }
       }
+
+      bot.chat(`Understood, ${username}. ${responseMessage}`);
     } else {
       throw new Error(`Unknown response type: ${parsedResponse.type}`);
     }
 
   } catch (error) {
-    logger.error('CHAT', 'ChatHandler', 'Error handling chat', { error: error.message });
-    bot.chat(`Sorry, ${username}, I couldn't process your request due to a ${error.name}. Please try rephrasing your message.`);
+    logger.error('CHAT', 'ChatHandler', 'Error handling chat', { error: error.message, stack: error.stack });
+    bot.chat(`Sorry, ${username}, I couldn't process your request due to an error. Please try rephrasing your message.`);
   }
 }
 
@@ -96,6 +99,7 @@ function generatePrompt(username, message, bot) {
   const currentGoalsString = currentGoals.length > 0
     ? currentGoals.map(goal => `- ${goal.intent} (ID: ${goal.id}, Status: ${goal.status})`).join('\n')
     : 'No current goals';
+  logger.debug('CHAT', 'ChatHandler', 'Current goals', { currentGoalsString });
 
   const currentState = `
     Agent State:
@@ -124,12 +128,6 @@ function generatePrompt(username, message, bot) {
       }
       return paramString;
     });
-
-    // Add 'stop' option for actions that can be stopped
-    const stoppableActions = ['followPlayer', 'collectBlock', 'attackEntity'];
-    if (stoppableActions.includes(action)) {
-      formattedParams.push('stop: boolean');
-    }
 
     return `  ${action}:\n    Parameters: ${formattedParams.join(', ')}`;
   }).join('\n\n');
@@ -160,12 +158,39 @@ function generatePrompt(username, message, bot) {
        - Actions clearly implied by the player's message
        - Stopping ongoing actions
     3. ONLY use actions listed in the available actions. DO NOT invent new ones.
-    4. To stop an ongoing action, use the 'action' type with the 'stop' parameter set to true.
-    5. To cancel an ongoing goal, use the 'action' type with a 'cancelGoal' action.
+    4. To stop or pause an ongoing goal, use the 'destroyGoal' or 'pauseGoal' action with the goal's ID.
+    5. Use 'resumeGoal' to continue a paused goal.
 
     IMPORTANT ACTION NOTES:
     - collectBlock: Use general terms (wood, dirt, stone) unless a specific block is mentioned.
     - followPlayer: Parameters: username, stopAtPlayerPosition, durationInMs
+
+    IMPORTANT: Goal Management Actions have the highest priority:
+    1. 'destroyGoal' has the absolute highest priority and will be executed immediately.
+    2. 'pauseGoal' and 'resumeGoal' have the second highest priority and will be executed immediately after any 'destroyGoal' actions.
+    3. These actions will interrupt and take precedence over any ongoing or queued goals.
+
+    When using these high-priority actions:
+    - Use 'destroyGoal' to immediately and permanently stop a goal.
+    - Use 'pauseGoal' to temporarily halt a goal that you intend to resume later.
+    - Use 'resumeGoal' to continue a previously paused goal.
+
+    Example of using a high-priority action:
+    {
+      'type': 'action',
+      'goal': {
+        'intent': 'Immediately stop current goal',
+        'priority': 10,  // High priority number
+        'actions': [
+          {
+            'type': 'destroyGoal',
+            'parameters': {
+              'goalId': '1234-5678-90ab-cdef'  // ID of the goal to stop
+            }
+          }
+        ]
+      }
+    }
 
     RESPONSE SCHEMA:
     {
@@ -194,9 +219,48 @@ function generatePrompt(username, message, bot) {
         'priority': 1,
         'actions': [
           {
-            'type': 'cancelGoal',
+            'type': 'destroyGoal',
             'parameters': {
               'goalId': string  // The ID of the goal to cancel
+            }
+          }
+        ]
+      }
+    }
+
+    New Goal Management Actions:
+    - Use 'pauseGoal' to temporarily interrupt a goal. The bot will resume this goal when other goals are completed.
+    - Use 'resumeGoal' to manually resume a paused goal.
+    - Use 'destroyGoal' to permanently remove a goal (replaces 'cancelGoal').
+
+    When deciding between pausing and destroying a goal:
+    - Pause when the interrupted task is likely to be resumed later (e.g., pausing 'follow player' to quickly gather resources).
+    - Destroy when the goal is no longer relevant or conflicts with new priorities.
+
+    Example for pausing a goal:
+    {
+      'type': 'action',
+      'goal': {
+        'intent': 'Pause following to collect wood',
+        'priority': 1,
+        'actions': [
+          {
+            'type': 'pauseGoal',
+            'parameters': {
+              'goalId': '1234-5678-90ab-cdef'  // ID of the 'follow player' goal
+            }
+          },
+          {
+            'type': 'collectBlock',
+            'parameters': {
+              'blockType': 'wood',
+              'quantity': 5
+            }
+          },
+          {
+            'type': 'resumeGoal',
+            'parameters': {
+              'goalId': '1234-5678-90ab-cdef'  // ID of the 'follow player' goal
             }
           }
         ]
@@ -260,24 +324,41 @@ function generatePrompt(username, message, bot) {
       }
     }
 
-    5. Stopping an action:
+    5. Stopping a goal:
     {
       'type': 'action',
       'goal': {
-        'intent': 'Stop following player',
-        'priority': 1,
+        'intent': 'Stop current goal',
+        'priority': 10,  // High priority number
         'actions': [
           {
-            'type': 'followPlayer',
+            'type': 'destroyGoal',
             'parameters': {
-              'stop': true
+              'goalId': '1234-5678-90ab-cdef'  // ID of the goal to stop
             }
           }
         ]
       }
     }
 
-    6. Handling a complex request:
+    6. Pausing a goal:
+    {
+      'type': 'action',
+      'goal': {
+        'intent': 'Pause current goal',
+        'priority': 9,  // Second highest priority number
+        'actions': [
+          {
+            'type': 'pauseGoal',
+            'parameters': {
+              'goalId': '1234-5678-90ab-cdef'  // ID of the goal to pause
+            }
+          }
+        ]
+      }
+    }
+
+    7. Handling a complex request:
     {
       'type': 'action',
       'goal': {
@@ -302,15 +383,15 @@ function generatePrompt(username, message, bot) {
       }
     }
 
-    7. Canceling a goal:
+    8. Canceling a goal:
     {
       'type': 'action',
       'goal': {
         'intent': 'Cancel specific goal',
-        'priority': 1,
+        'priority': 10,  // High priority number
         'actions': [
           {
-            'type': 'cancelGoal',
+            'type': 'destroyGoal',
             'parameters': {
               'goalId': '1234-5678-90ab-cdef'  // Example goal ID
             }

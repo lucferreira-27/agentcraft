@@ -66,8 +66,10 @@ actionRegistry.registerAction('followPlayer', async function({ username, stopAtP
   return new Promise((resolve) => {
     const startTime = Date.now();
     let closePositionCount = 0;
+    let isPaused = false;
+
     const followInterval = setInterval(() => {
-      if (shouldStop()) {
+      if (shouldStop() || isPaused) {
         clearInterval(followInterval);
         logger.debug('ACTION', 'followPlayer', `Stopped following player: ${username}`);
         resolve({ stopped: true });
@@ -104,6 +106,22 @@ actionRegistry.registerAction('followPlayer', async function({ username, stopAtP
         closePositionCount = 0;
       }
     }, 100);
+
+    const pauseFollowing = () => {
+      if (isPaused) {resumeFollowing(); return}
+      
+      logger.debug('ACTION', 'ActionRegistry', `Pausing following player: ${username}`);
+      isPaused = true;
+      bot.pathfinder.setGoal(null);
+    };
+
+    const resumeFollowing = () => {
+      logger.debug('ACTION', 'ActionRegistry', `Resuming following player: ${username}`);
+      isPaused = false;
+    };
+
+    // Register pause and resume methods
+    goalManager.registerActionPauseMethod('followPlayer', pauseFollowing);
 
     if (!stopAtPlayerPosition) {
       setTimeout(() => {
@@ -154,8 +172,6 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
       return { collected: collectedCount, stopped: true };
     }
 
-    if (collectedCount >= quantity) break;
-
     const blockPositions = bot.findBlocks({
       matching: blocksToCollect.map(type => bot.registry.blocksByName[type]?.id).filter(id => id !== undefined),
       maxDistance: maxSearchDistance,
@@ -170,7 +186,7 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
     blockPositions.sort((a, b) => bot.entity.position.distanceTo(a) - bot.entity.position.distanceTo(b));
 
     for (const blockPos of blockPositions) {
-      await collectDroppedItems();
+      //await collectDroppedItems();
 
       if (shouldStop()) {
         logger.debug('ACTION', 'collectBlock', `Stopping block collection as requested.`);
@@ -198,7 +214,7 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
 
         logger.debug('ACTION', 'collectBlock', `Attempting to dig ${block.name} at ${blockPos}`);
         await bot.dig(block);
-        await collectDroppedItems();
+        //await collectDroppedItems();
         collectedCount++;
         logger.debug('ACTION', 'collectBlock', `Collected dropped items after digging ${block.name} at ${blockPos}`);
         logger.debug('ACTION', 'collectBlock', `Collected ${collectedCount}/${quantity}`);
@@ -210,6 +226,8 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
 
       } catch (error) {
         logger.error('ACTION', 'collectBlock', `Error collecting ${block.name} at ${blockPos}`, { error: error.message });
+        //traceback
+        console.trace(error);
       }
 
       if (collectedCount >= quantity) break;
@@ -432,16 +450,25 @@ actionRegistry.registerAction('craft', async function({ itemName, quantity }, bo
   }
 });
 
-actionRegistry.registerAction('cancelGoalById', async function({ goalId }, bot, goalManager, shouldStop) {
-  logger.debug('ACTION', 'cancelGoalById', `Attempting to cancel goal with ID: ${goalId}`);
-  const cancelledGoal = goalManager.cancelGoalById(goalId);
-  if (cancelledGoal) {
-    logger.debug('ACTION', 'cancelGoalById', `Successfully cancelled goal with ID: ${goalId}`);
-    return { cancelled: true, goal: cancelledGoal };
-  } else {
-    logger.warn('ACTION', 'cancelGoalById', `Failed to cancel goal with ID: ${goalId}. Goal not found.`);
-    return { cancelled: false, goal: null };
-  }
+// High-priority action: Immediately destroys a goal
+actionRegistry.registerAction('destroyGoal', async function({ goalId }, bot, goalManager, shouldStop) {
+  logger.debug('ACTION', 'destroyGoal', `Attempting to destroy goal with ID: ${goalId}`);
+  const destroyed = goalManager.destroyGoal(goalId);
+  return { destroyed, goalId };
+});
+
+// High-priority action: Immediately pauses a goal
+actionRegistry.registerAction('pauseGoal', async function({ goalId }, bot, goalManager, shouldStop) {
+  logger.debug('ACTION', 'pauseGoal', `Attempting to pause goal with ID: ${goalId}`);
+  const paused = goalManager.pauseGoal(goalId);
+  return { paused, goalId };
+});
+
+// High-priority action: Immediately resumes a paused goal
+actionRegistry.registerAction('resumeGoal', async function({ goalId }, bot, goalManager, shouldStop) {
+  logger.debug('ACTION', 'resumeGoal', `Attempting to resume goal with ID: ${goalId}`);
+  const resumed = goalManager.resumeGoal(goalId);
+  return { resumed, goalId };
 });
 
 module.exports = actionRegistry;

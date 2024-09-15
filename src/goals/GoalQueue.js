@@ -1,6 +1,9 @@
+const logger = require('../logger');
+
 class GoalQueue {
   constructor() {
     this.goals = [];
+    logger.debug('GOAL', 'GoalQueue', 'Goal Queue initialized');
   }
 
   /**
@@ -24,6 +27,7 @@ class GoalQueue {
         this.goals.push(goal);
       }
     }
+    logger.debug('GOAL', 'GoalQueue', `Goal enqueued: ${goal.intent}`, { goalId: goal.id, queueLength: this.goals.length });
   }
 
   /**
@@ -31,7 +35,11 @@ class GoalQueue {
    * @returns {Goal|undefined}
    */
   dequeue() {
-    return this.goals.shift();
+    const goal = this.goals.shift();
+    if (goal) {
+      logger.debug('GOAL', 'GoalQueue', `Goal dequeued: ${goal.intent}`, { goalId: goal.id, queueLength: this.goals.length });
+    }
+    return goal;
   }
 
   /**
@@ -50,8 +58,11 @@ class GoalQueue {
   removeById(goalId) {
     const index = this.goals.findIndex(goal => goal.id === goalId);
     if (index !== -1) {
-      return this.goals.splice(index, 1)[0];
+      const removedGoal = this.goals.splice(index, 1)[0];
+      logger.debug('GOAL', 'GoalQueue', `Goal removed by ID: ${removedGoal.intent}`, { goalId: removedGoal.id, queueLength: this.goals.length });
+      return removedGoal;
     }
+    logger.debug('GOAL', 'GoalQueue', `No goal found with ID: ${goalId}`);
     return null;
   }
 }

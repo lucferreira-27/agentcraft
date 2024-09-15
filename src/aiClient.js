@@ -36,9 +36,7 @@ const model = genAI.getGenerativeModel({
 
 async function getAIResponse(prompt, context = {}) {
   try {
-
-
-    logger.info('AIClient', `Sending prompt to Gemini API: ${prompt.substring(0, 100)}...`);
+    logger.debug('AI', 'AIClient', 'Sending prompt to Gemini API', { promptPreview: prompt.substring(0, 100) });
     const startTime = Date.now();
     
     const result = await model.generateContent({
@@ -47,14 +45,14 @@ async function getAIResponse(prompt, context = {}) {
 
     const response = result.response;
     const endTime = Date.now();
-    logger.info('AIClient', `Gemini API response time: ${endTime - startTime}ms`);
+    logger.info('AI', 'AIClient', `Gemini API response time: ${endTime - startTime}m | Token count: ${result.response.usageMetadata?.totalTokenCount}`);
     
     const jsonResponse = response.candidates[0].content.parts[0].text;
-    logger.info('AIClient', `Received JSON response from Gemini API: ${JSON.stringify(jsonResponse).substring(0, 100)}...`);
+    logger.debug('AI', 'AIClient', 'Received JSON response from Gemini API', { responsePreview: JSON.stringify(jsonResponse).substring(0, 100) });
     
     return jsonResponse;
   } catch (error) {
-    logger.error('AIClient', `Error communicating with Gemini API: ${error.message}`);
+    logger.error('AI', 'AIClient', 'Error communicating with Gemini API', { error: error.message });
     throw new Error('AI response failed.');
   }
 }
@@ -88,16 +86,19 @@ Please respond with a JSON object containing either an alternative action or a d
 `;
 
   try {
+    logger.info('AI', 'AIClient', 'Requesting alternative action for failed action', { goal: goal.intent, failedAction: action.type });
     const response = await getAIResponse(prompt, context);
     const parsedResponse = JSON.parse(response);
 
     if (parsedResponse.decision === 'retry' && parsedResponse.alternativeAction) {
+      logger.info('AI', 'AIClient', 'Received alternative action', { alternativeAction: parsedResponse.alternativeAction });
       return parsedResponse.alternativeAction;
     } else {
+      logger.info('AI', 'AIClient', 'Decision to skip action');
       return null; // Skip the action
     }
   } catch (error) {
-    logger.error('AIClient', `Error handling action error: ${error.message}`);
+    logger.error('AI', 'AIClient', 'Error handling action error', { error: error.message });
     return null; // Skip the action if we can't get a valid response
   }
 }

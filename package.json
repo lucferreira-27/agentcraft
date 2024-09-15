@@ -8,7 +8,8 @@
     "mineflayer-collectblock": "^1.4.1",
     "mineflayer-pathfinder": "^2.4.5",
     "uuid": "^10.0.0",
-    "vec3": "^0.1.10"
+    "vec3": "^0.1.10",
+    "chalk": "4.1.2"
   },
   "scripts": {
     "start": "node src/bot.js",

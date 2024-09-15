@@ -32,43 +32,30 @@ function ensureBotReady() {
 async function handleChat(username, message) {
   const bot = await ensureBotReady();
   try {
-    logger.info('ChatHandler', `Received message from ${username}: "${message}"`);
+    logger.info('CHAT', 'ChatHandler', `Received message from ${username}: "${message}"`);
     
-    // Record the interaction in memory
     Memory.recordInteraction({ user: username, message, timestamp: Date.now() });
-    logger.info('ChatHandler', 'Interaction recorded in memory');
+    logger.debug('CHAT', 'ChatHandler', 'Interaction recorded in memory');
 
-    // Generate prompt for Gemini
     const prompt = generatePrompt(username, message, bot);
-    logger.info('ChatHandler', 'Generated prompt for AI');
+    logger.debug('AI', 'ChatHandler', 'Generated prompt for AI');
 
-    // Get AI response
-    logger.info('ChatHandler', 'Requesting AI response');
+    logger.info('AI', 'ChatHandler', 'Requesting AI response');
     const aiOutput = await getAIResponse(prompt);
-    logger.info('ChatHandler', `Received AI response: ${JSON.stringify(aiOutput)}`);
-
-    // Handle error responses from aiClient
     if (aiOutput.type === 'error') {
-      logger.error('ChatHandler', `Error in AI response: ${aiOutput.message}`);
-      logger.info('ChatHandler', `Raw AI response: ${aiOutput.rawResponse}`);
+      logger.error('AI', 'ChatHandler', 'Error in AI response', { error: aiOutput });
       throw new Error('Invalid AI response format');
     }
 
-    // Parse AI response
-    logger.info('ChatHandler', 'Parsing AI response');
+    logger.debug('CHAT', 'ChatHandler', 'Parsing AI response');
     const parsedResponse = CommandParser.parse(aiOutput);
-    logger.info('ChatHandler', `Parsed response type: ${parsedResponse.type}`);
+    logger.debug('CHAT', 'ChatHandler', `Parsed response type: ${parsedResponse.type}`);
     
-    // Handle conversational responses
     if (parsedResponse.type === 'conversation') {
-      logger.info('ChatHandler', `Sending conversational response: "${parsedResponse.message}"`);
+      logger.info('CHAT', 'ChatHandler', `Sending conversational response: "${parsedResponse.message}"`);
       bot.chat(parsedResponse.message);
-    }
-
-    // Handle action plans
-    else if (parsedResponse.type === 'action') {
-      logger.info('ChatHandler', `Adding new goal: ${parsedResponse.goal.intent}`);
-      logger.info('ChatHandler', `Goal details: ${JSON.stringify(parsedResponse.goal, null, 2)}`);
+    } else if (parsedResponse.type === 'action') {
+      logger.info('GOAL', 'ChatHandler', `Adding new goal: ${parsedResponse.goal.intent}`);
       const result = goalManager.addGoal(parsedResponse.goal);
       
       switch (result.outcome) {
@@ -90,15 +77,12 @@ async function handleChat(username, message) {
         default:
           bot.chat(`I've processed your request, ${username}, but I'm not sure how to respond.`);
       }
-    }
-
-    else {
+    } else {
       throw new Error(`Unknown response type: ${parsedResponse.type}`);
     }
 
   } catch (error) {
-    logger.error('ChatHandler', `Error handling chat: ${error.message}`);
-    logger.info('ChatHandler', `Error stack: ${error.stack}`);
+    logger.error('CHAT', 'ChatHandler', 'Error handling chat', { error: error.message });
     bot.chat(`Sorry, ${username}, I couldn't process your request due to a ${error.name}. Please try rephrasing your message.`);
   }
 }
@@ -150,7 +134,7 @@ function generatePrompt(username, message, bot) {
     return `  ${action}:\n    Parameters: ${formattedParams.join(', ')}`;
   }).join('\n\n');
 
-  logger.info('ChatHandler', `Available actions: ${availableActions}`);
+  logger.debug('AI', 'ChatHandler', 'Available actions', { availableActions });
 
   return `
     You are an AI companion in a Minecraft game, assisting the player by understanding and responding to their messages. Your responses MUST be either conversational or action-based, depending on the player's request. You now have the ability to view and cancel ongoing goals.

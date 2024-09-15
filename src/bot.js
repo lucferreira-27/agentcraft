@@ -7,23 +7,34 @@ const bot = botManager.createBot();
 
 // Handle chat messages
 bot.on('chat', (username, message) => {
-  if (username === bot.username) return; // Ignore messages from the bot itself
-  logger.info('Bot', `Received chat message from ${username}: ${message}`);
-  const chatHandler = require('./chatHandler');
-  chatHandler.handleChat(username, message);
+  if (username === bot.username) {
+    logger.info('CHAT', 'Bot', `Bot sent message: "${message}"`);
+  } else {
+    logger.info('CHAT', 'Server', `${username}: "${message}"`);
+    const chatHandler = require('./chatHandler');
+    chatHandler.handleChat(username, message);
+  }
+});
+
+// Log other server messages
+bot.on('message', (jsonMsg) => {
+  const plainText = jsonMsg.toAnsi(); // Convert to plain text
+  if (plainText.trim() !== '') {
+    logger.debug('SERVER', 'Message', plainText);
+  }
 });
 
 // Periodically update memory or perform background tasks
 setInterval(() => {
   if (bot && bot.entity) {
-    //logger.info('Bot', 'Updating memory with current state');
-    // Example: Update memory with current state
-    memory.recordState({
+    const state = {
       position: bot.entity.position,
       health: bot.health,
       inventory: bot.inventory.items().map(item => item.name),
       time: bot.time,
-    });
+    };
+    memory.recordState(state);
+    logger.debug('BOT', 'State', 'Updated bot state', { state });
   }
 }, 5000);
 
@@ -44,6 +55,7 @@ function recordBotState() {
         count: item.count
       }))
     };
+    logger.debug('BOT', 'State', 'Recorded bot state', { state });
     Memory.recordState(state);
   }
 }

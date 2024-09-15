@@ -10,6 +10,7 @@ const GoalAddOutcome = {
   IGNORED_ONGOING: 'IGNORED_ONGOING',
   STOPPED_EXISTING: 'STOPPED_EXISTING'
 };
+
 class GoalManager {
   constructor(bot) {
     this.bot = bot;
@@ -19,6 +20,7 @@ class GoalManager {
     this.ongoingActions = new Map(); // Track ongoing actions
     this.goalCooldowns = new Map(); // Track cooldowns for goal types
     this.actionExecutor = new ActionExecutor(bot, this);
+    logger.debug('GOAL', 'GoalManager', 'Goal Manager initialized');
   }
 
   /**
@@ -32,7 +34,7 @@ class GoalManager {
 
     // Check if this is a cancel goal action
     if (actions[0].type === 'cancelGoal') {
-      logger.info('GoalManager', `Executing cancel goal action immediately for goal ID: ${actions[0].parameters.goalId}`);
+      logger.info('GOAL', 'GoalManager', `Executing cancel goal action for goal ID: ${actions[0].parameters.goalId}`);
       return this.executeCancelGoalAction(actions[0].parameters.goalId);
     }
 
@@ -54,6 +56,7 @@ class GoalManager {
     this.processGoals();
     this.logGoalState();
 
+    logger.debug('GOAL', 'GoalManager', `New goal added: ${newGoal.intent}`, { goalId: newGoal.id });
     return { outcome: GoalAddOutcome.ADDED, goal: newGoal };
   }
 
@@ -225,12 +228,12 @@ class GoalManager {
       goal.status = 'running';
       this.logGoalState();
 
-      logger.info('GoalManager', `Starting execution of goal: ${goal.id} - ${goal.intent}`);
+      logger.debug('GOAL', 'GoalManager', `Starting execution of goal: ${goal.intent}`, { goalId: goal.id });
 
       try {
         await this.executeGoal(goal);
       } catch (error) {
-        logger.error('GoalManager', `Failed to execute goal ${goal.id}: ${error.message}`);
+        logger.error('GOAL', 'GoalManager', `Failed to execute goal: ${goal.intent}`, { goalId: goal.id, error: error.message });
         goal.status = 'failed';
       } finally {
         this.currentGoal = null;
@@ -251,11 +254,11 @@ class GoalManager {
     for (const action of goal.actions) {
       if (goal.stopSignal) {
         goal.status = 'stopped';
-        logger.info('GoalManager', `Goal ${goal.id} stopped prematurely`);
+        logger.debug('GOAL', 'GoalManager', `Goal stopped prematurely: ${goal.intent}`, { goalId: goal.id });
         break;
       }
 
-      logger.info('GoalManager', `Executing action for goal ${goal.id}: ${action.type}`);
+      logger.debug('GOAL', 'GoalManager', `Executing action for goal: ${goal.intent}`, { goalId: goal.id, actionType: action.type });
       this.ongoingActions.set(action.type, goal);
 
       try {
@@ -264,16 +267,16 @@ class GoalManager {
         this.ongoingActions.delete(action.type);
 
         if (result && result.stopped) {
-          logger.info('GoalManager', `Action ${action.type} was stopped prematurely. ${result.collected ? `Collected ${result.collected} items.` : ''}`);
+          logger.debug('GOAL', 'GoalManager', `Action stopped prematurely: ${action.type}`, { goalId: goal.id, collected: result.collected });
           break;
         }
 
         if (action.type === 'followPlayer' && result.reason === 'reached_position') {
-          logger.info('GoalManager', `Player reached, continuing to next action`);
+          logger.debug('GOAL', 'GoalManager', `Player reached, continuing to next action`, { goalId: goal.id });
           continue;
         }
       } catch (actionError) {
-        logger.error('GoalManager', `Error executing action ${action.type} for goal ${goal.id}: ${actionError.message}`);
+        logger.error('GOAL', 'GoalManager', `Error executing action: ${action.type}`, { goalId: goal.id, error: actionError.message });
         continue;
       }
 
@@ -282,7 +285,7 @@ class GoalManager {
 
     if (goal.status !== 'stopped') {
       goal.status = 'completed';
-      logger.info('GoalManager', `Goal ${goal.id} completed successfully`);
+      logger.info('GOAL', 'GoalManager', `Goal completed successfully: ${goal.intent}`);
     }
     goal.isRunning = false;
   }
@@ -292,7 +295,7 @@ class GoalManager {
    */
   stopCurrentGoal() {
     if (this.currentGoal && this.currentGoal.isRunning) {
-      logger.info('GoalManager', `Stopping current goal: "${this.currentGoal.intent}"`);
+      logger.info('GOAL', 'GoalManager', `Stopping current goal: "${this.currentGoal.intent}"`);
       this.currentGoal.stopSignal = true;
       this.currentGoal.status = 'stopped';
       // Interrupt the current action
@@ -305,7 +308,7 @@ class GoalManager {
       this.logGoalState();
       return stoppedGoal;
     } else {
-      logger.warn('GoalManager', 'No active goal to stop');
+      logger.warn('GOAL', 'GoalManager', 'No active goal to stop');
       return null;
     }
   }
@@ -318,14 +321,14 @@ class GoalManager {
   stopSpecificAction(actionType) {
     const goal = this.ongoingActions.get(actionType);
     if (goal) {
-      logger.info('GoalManager', `Stopping specific action: ${actionType}`);
+      logger.info('GOAL', 'GoalManager', `Stopping specific action: ${actionType}`);
       goal.stopSignal = true;
       goal.status = 'stopped';
       this.ongoingActions.delete(actionType);
       this.logGoalState();
       return goal;
     } else {
-      logger.warn('GoalManager', `No ongoing action of type ${actionType} to stop`);
+      logger.warn('GOAL', 'GoalManager', `No ongoing action of type ${actionType} to stop`);
       return null;
     }
   }
@@ -335,11 +338,12 @@ class GoalManager {
    */
   logGoalState() {
     const state = this.getGoalState();
-    logger.info('GoalManager', `Current Goal State:
-      Queued Goals: ${state.queuedGoals}
-      Current Goal: ${state.currentGoal ? `${state.currentGoal.intent} (Priority: ${state.currentGoal.priority}, Status: ${state.currentGoal.status})` : 'None'}
-      Ongoing Actions: ${state.ongoingActions.join(', ') || 'None'}
-      Total Goals: ${state.totalGoals}`);
+    logger.debug('GOAL', 'GoalManager', 'Current Goal State', {
+      queuedGoals: state.queuedGoals,
+      currentGoal: state.currentGoal ? `${state.currentGoal.intent} (Priority: ${state.currentGoal.priority}, Status: ${state.currentGoal.status})` : 'None',
+      ongoingActions: state.ongoingActions.join(', ') || 'None',
+      totalGoals: state.totalGoals
+    });
   }
 
   /**
@@ -381,15 +385,15 @@ class GoalManager {
   cancelGoalById(goalId) {
     if (this.currentGoal && this.currentGoal.id === goalId) {
       const cancelledGoal = this.stopCurrentGoal();
-      logger.info('GoalManager', `Cancelled current goal with ID: ${goalId}`);
+      logger.info('GOAL', 'GoalManager', `Cancelled current goal with ID: ${goalId}`);
       return cancelledGoal;
     }
     const cancelledGoal = this.goalQueue.removeById(goalId);
     if (cancelledGoal) {
-      logger.info('GoalManager', `Cancelled queued goal with ID: ${goalId}`);
+      logger.info('GOAL', 'GoalManager', `Cancelled queued goal with ID: ${goalId}`);
       return cancelledGoal;
     }
-    logger.warn('GoalManager', `No goal found with ID: ${goalId}`);
+    logger.warn('GOAL', 'GoalManager', `No goal found with ID: ${goalId}`);
     return null;
   }
 
@@ -401,7 +405,5 @@ class GoalManager {
     };
   }
 }
-
-
 
 module.exports = { GoalManager, GoalAddOutcome };

@@ -1,4 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
+const logger = require('../logger');
 
 class Goal {
   /**
@@ -15,6 +16,7 @@ class Goal {
     this.isRunning = false;
     this.stopSignal = false;
     this.status = 'queued'; // 'queued', 'running', 'completed', 'failed', 'stopped'
+    logger.debug('GOAL', 'Goal', `Created new goal: ${this.intent}`, { id: this.id, priority: this.priority });
   }
 
   /**
@@ -38,6 +40,7 @@ class Goal {
       }
     }
     
+    logger.debug('GOAL', 'Goal', `Goal ${this.id} is similar to ${otherGoal.id}`);
     return true;
   }
 }

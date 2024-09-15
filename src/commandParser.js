@@ -2,11 +2,10 @@ const logger = require('./logger');
 
 function parse(aiOutput) {
   try {
-    logger.info('CommandParser', `Parsing AI output: ${aiOutput}`);
+    logger.debug('AI', 'CommandParser', 'Parsing AI output');
     const parsed = JSON.parse(aiOutput.trim());
 
     if (parsed.type === 'conversation' && parsed.message) {
-      logger.info('CommandParser', 'Parsed conversation response');
       return { type: 'conversation', message: parsed.message };
     }
 
@@ -22,14 +21,14 @@ function parse(aiOutput) {
         return action;
       });
       
-      logger.info('CommandParser', `Parsed action response with intent: ${parsed.goal.intent}`);
+      logger.debug('AI', 'CommandParser', `Parsed action response intent: ${parsed.goal.intent}`);
       return { type: 'action', goal: parsed.goal };
     }
 
-    logger.warn('CommandParser', 'Invalid AI response format');
+    logger.warn('AI', 'CommandParser', 'Invalid AI response format');
     throw new Error('Invalid AI response format.');
   } catch (error) {
-    logger.error('CommandParser', `Error parsing AI response: ${error.message}`);
+    logger.error('AI', 'CommandParser', 'Error parsing AI response', { error: error.message });
     throw new Error('Failed to parse AI response.');
   }
 }

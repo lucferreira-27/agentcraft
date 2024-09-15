@@ -10,7 +10,7 @@ class BotManager extends EventEmitter {
   }
 
   createBot() {
-    logger.info('BotManager', 'Creating new bot instance');
+    logger.info('BOT', 'BotManager', 'Creating new bot instance');
     this.bot = mineflayer.createBot({
       host: process.env.MINECRAFT_HOST,
       port: parseInt(process.env.MINECRAFT_PORT),
@@ -21,7 +21,11 @@ class BotManager extends EventEmitter {
     this.bot.loadPlugin(pathfinder);
 
     this.bot.once('spawn', () => {
-      logger.info('BotManager', 'Bot has spawned into the game');
+      const info = { 
+        position: this.bot.entity.position,
+        username: this.bot.username
+      }
+      logger.info('BOT', 'BotManager', `[${info.username}] has spawned into the game`);
       const defaultMove = new Movements(this.bot);
       this.bot.pathfinder.setMovements(defaultMove);
       this.bot.chat('Hello! I am your AI companion. How can I assist you today?');
@@ -29,7 +33,7 @@ class BotManager extends EventEmitter {
     });
 
     this.bot.on('error', (error) => {
-      logger.error('BotManager', `Minecraft bot error: ${error.message}`);
+      logger.error('BOT', 'BotManager', 'Minecraft bot error', { error });
     });
 
     return this.bot;

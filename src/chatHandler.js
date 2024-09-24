@@ -110,6 +110,7 @@ function generatePrompt(username, message, bot) {
     - Current Goals:
     ${currentGoalsString}
   `;
+  logger.debug('CHAT', 'ChatHandler', 'Current state', { currentState });
 
   const availableActions = Array.from(actionRegistry.actions.keys()).map(action => {
     const schema = parameterSchemas[action];
@@ -142,11 +143,11 @@ function generatePrompt(username, message, bot) {
 
     Available actions:
     ${availableActions}
-
+    
     Recent chat history:
     ${recentInteractions}
-
-    Player (${username}): "${message}"
+    ---------------------------------------------------------
+    !New Message from Player (${username}): "${message}"!
 
     RESPONSE GUIDELINES:
     1. Use 'conversation' type for:

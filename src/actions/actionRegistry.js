@@ -140,6 +140,16 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
 
   logger.debug('ACTION', 'collectBlock', `Starting to collect ${quantity} ${blockType}`, { blocksToCollect });
 
+  // Create initial inventory snapshot
+  const initialInventory = bot.inventory.items().filter(item => blocksToCollect.includes(item.name));
+  const initialCount = initialInventory.reduce((sum, item) => sum + item.count, 0);
+
+  function getCollectedCount() {
+    const currentInventory = bot.inventory.items().filter(item => blocksToCollect.includes(item.name));
+    const currentCount = currentInventory.reduce((sum, item) => sum + item.count, 0);
+    return currentCount - initialCount;
+  }
+
   async function collectDroppedItems() {
     logger.debug('ACTION', 'collectBlock', `Collecting dropped items`);
     const droppedItems = Object.values(bot.entities).filter(entity => 
@@ -214,10 +224,13 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
 
         logger.debug('ACTION', 'collectBlock', `Attempting to dig ${block.name} at ${blockPos}`);
         await bot.dig(block);
-        //await collectDroppedItems();
-        collectedCount++;
-        logger.debug('ACTION', 'collectBlock', `Collected dropped items after digging ${block.name} at ${blockPos}`);
-        logger.debug('ACTION', 'collectBlock', `Collected ${collectedCount}/${quantity}`);
+        
+        // Update collected count based on inventory
+        const newCollectedCount = getCollectedCount();
+        const justCollected = newCollectedCount - collectedCount;
+        collectedCount = newCollectedCount;
+        
+        logger.debug('ACTION', 'collectBlock', `Collected ${justCollected} ${block.name} at ${blockPos}. Total: ${collectedCount}/${quantity}`);
 
         if (bot.inventory.emptySlotCount() === 0) {
           logger.warn('ACTION', 'collectBlock', `Inventory full. Stopping collection.`);
@@ -225,9 +238,7 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
         }
 
       } catch (error) {
-        logger.error('ACTION', 'collectBlock', `Error collecting ${block.name} at ${blockPos}`, { error: error.message });
-        //traceback
-        console.trace(error);
+        logger.error('ACTION', 'collectBlock', `Error collecting ${block.name} at ${blockPos}`, { error: error.message, stack: error.stack });
       }
 
       if (collectedCount >= quantity) break;
@@ -239,8 +250,9 @@ actionRegistry.registerAction('collectBlock', async function({ blockType, quanti
     }
   }
 
-  logger.debug('ACTION', 'collectBlock', `Finished collecting ${blockType}`, { collected: collectedCount });
-  return { collected: collectedCount, stopped: false };
+  const finalCollectedCount = getCollectedCount();
+  logger.debug('ACTION', 'collectBlock', `Finished collecting ${blockType}`, { collected: finalCollectedCount, target: quantity });
+  return { collected: finalCollectedCount, stopped: false, reason: finalCollectedCount >= quantity ? 'target_reached' : 'no_more_blocks' };
 });
 
 actionRegistry.registerAction('buildStructure', async function({ structureType, location }, bot, goalManager, shouldStop) {
